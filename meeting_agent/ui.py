@@ -257,6 +257,14 @@ class Controller:
             self.tray.showMessage("Meeting Agent Error", f"Recording failed: {e}", QSystemTrayIcon.Warning)
             return
 
+        if self.recorder.loopback_error:
+            self.tray.showMessage(
+                "Loopback Capture Failed",
+                f"Only your microphone was recorded -- other participants' audio "
+                f"was missed ({self.recorder.loopback_error}).",
+                QSystemTrayIcon.Warning,
+            )
+
         self._worker = PipelineWorker(wav_path, self._screenshots, self.cfg, self._platform)
         self._worker.finished_ok.connect(self._on_pipeline_finished)
         self._worker.failed.connect(self._on_pipeline_failed)
