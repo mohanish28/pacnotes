@@ -26,7 +26,12 @@ def _classify_title(title: str, wm_class: str | None = None) -> str | None:
         # "Zoom Meeting" as older docs/spec assume. WM_CLASS is required here
         # since "Meeting" alone is too generic (e.g. a calendar event window).
         return "Zoom"
-    if "Meet -" in title:
+    if title.startswith("Meet -"):
+        # Verified live: an active call's tab title is "Meet - xxx-yyyy-zzz -
+        # Google Chrome" (starts with "Meet -"). The pre-join lobby page's tab
+        # is "Google Meet - Google Chrome" -- a plain `"Meet -" in title` check
+        # false-positives on it too, since that substring appears later in the
+        # lobby's title as well. startswith() distinguishes an actual call.
         return "Google Meet"
     if "Microsoft Teams" in title and "Meeting" in title:
         return "Microsoft Teams"
