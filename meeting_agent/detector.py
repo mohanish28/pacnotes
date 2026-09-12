@@ -15,10 +15,16 @@ POLL_INTERVAL_SEC = 2.0
 CONFIRM_POLLS = 2  # consecutive matching polls required before firing an event
 
 
-def _classify_title(title: str) -> str | None:
+def _classify_title(title: str, wm_class: str | None = None) -> str | None:
     if not title:
         return None
     if title == "Zoom Meeting":
+        return "Zoom"
+    if title == "Meeting" and wm_class == "zoom":
+        # Verified on a real Zoom Linux build: the in-call window's actual title
+        # is bare "Meeting" (the lobby window is "Zoom Workplace - ..."), not
+        # "Zoom Meeting" as older docs/spec assume. WM_CLASS is required here
+        # since "Meeting" alone is too generic (e.g. a calendar event window).
         return "Zoom"
     if "Meet -" in title:
         return "Google Meet"
@@ -27,17 +33,17 @@ def _classify_title(title: str) -> str | None:
     return None
 
 
-def _all_window_titles_windows() -> list[str]:
+def _all_window_titles_windows() -> list[tuple[str, str | None]]:
     import pygetwindow as gw
 
-    return [w.title for w in gw.getAllWindows()]
+    return [(w.title, None) for w in gw.getAllWindows()]
 
 
 _x11_display = None
 _x11_unsupported = False
 
 
-def _all_window_titles_linux() -> list[str]:
+def _all_window_titles_linux() -> list[tuple[str, str | None]]:
     # ponytail: X11/XWayland only, no wlr-foreign-toplevel or GNOME "Window Calls"
     # support; add one of those if native-Wayland detection is ever needed.
     global _x11_display, _x11_unsupported
@@ -56,17 +62,19 @@ def _all_window_titles_linux() -> list[str]:
         if client_list is None:
             return []
 
-        titles = []
+        entries = []
         for window_id in client_list.value:
             try:
                 window = _x11_display.create_resource_object("window", window_id)
                 name_prop = window.get_full_property(net_wm_name, 0)
+                wm_class = window.get_wm_class()
             except XError:
                 continue
             if name_prop and name_prop.value:
                 value = name_prop.value
-                titles.append(value.decode("utf-8", "ignore") if isinstance(value, bytes) else value)
-        return titles
+                title = value.decode("utf-8", "ignore") if isinstance(value, bytes) else value
+                entries.append((title, wm_class[1].lower() if wm_class else None))
+        return entries
     except Exception:
         # No X11 display (e.g. python-xlib missing, or a pure-Wayland session
         # with no XWayland root) -> detection degrades to manual trigger only.
@@ -75,9 +83,9 @@ def _all_window_titles_linux() -> list[str]:
 
 
 def _current_meeting_platform() -> str | None:
-    titles = _all_window_titles_windows() if sys.platform == "win32" else _all_window_titles_linux()
-    for title in titles:
-        platform = _classify_title(title)
+    entries = _all_window_titles_windows() if sys.platform == "win32" else _all_window_titles_linux()
+    for title, wm_class in entries:
+        platform = _classify_title(title, wm_class)
         if platform:
             return platform
     return None
