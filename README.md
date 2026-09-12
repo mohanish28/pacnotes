@@ -61,6 +61,19 @@ pyinstaller --noconsole --onefile --name MeetingAgent --add-data "meeting-notes-
 The `--add-data` flag ships `meeting-notes-prompt.md` alongside the exe — the app
 looks for it next to the package, so keep it in the same folder as the built exe.
 
+## Running on Linux
+
+Everything works on Linux except automatic meeting detection has one caveat:
+detection is X11-based (via `python-xlib`), so it sees X11 and XWayland-mapped
+windows but not native-Wayland app windows. On a plain GNOME/Wayland session
+with native-Wayland Zoom/Chrome, auto-popup may never fire — use **Take notes
+now** in the tray menu instead, which skips detection entirely and works
+identically everywhere. On X11 sessions (Xorg login, XFCE, KDE X11, i3, sway
+with XWayland, etc.) auto-detection works normally.
+
+`pip install -r requirements.txt` picks the right window-detection dependency
+per OS automatically (`pygetwindow` on Windows, `python-xlib` on Linux).
+
 ## Notes
 - CUDA is used for transcription automatically if available, otherwise it falls
   back to CPU (`transcriber.py`).
