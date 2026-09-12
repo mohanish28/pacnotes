@@ -9,7 +9,7 @@ from pathlib import Path
 
 DEFAULTS = {
     "gemini_api_key": "",
-    "gemini_model": "gemini-2.5-flash",
+    "gemini_model": "gemini-3.6-flash",
     "gmail_address": "",
     "gmail_app_password": "",
     "recipient_email": "",
