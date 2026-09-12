@@ -192,32 +192,49 @@ class Controller:
     def _on_manual_trigger(self):
         if self._recording:
             return
-        self._start_recording("Manual")
+        self._begin_capture("Manual")
+        self._show_floating_bar()
 
     def _on_meeting_detected(self, platform: str):
         if self._recording:
             return
+        # Start capturing before the popup even shows: opening the audio streams
+        # has a ~1.5-2s fixed connection latency, so pre-warming it here overlaps
+        # that gap with the user reading/clicking the popup instead of losing the
+        # first couple seconds of the meeting.
+        self._begin_capture(platform)
         popup = TakeNotesPopup(platform)
         if popup.exec() == QDialog.Accepted:
-            self._start_recording(platform)
+            self._show_floating_bar()
+        else:
+            self._discard_capture()
 
     def _on_meeting_ended(self):
         if self._recording:
             self._stop_and_process()
 
-    def _start_recording(self, platform: str):
+    def _begin_capture(self, platform: str):
         self._recording = True
         self._platform = platform
         self._screenshots = []
         stamp = time.strftime("%Y%m%d-%H%M%S")
         self._session_dir = Path(self.cfg["output_dir"]) / f"session-{stamp}"
-
         self.recorder.start()
 
+    def _show_floating_bar(self):
         self._floating_bar = FloatingBar()
         self._floating_bar.screenshot_clicked.connect(self._on_screenshot)
         self._floating_bar.stop_clicked.connect(self._stop_and_process)
         self._floating_bar.show()
+
+    def _discard_capture(self):
+        """User clicked No on the popup -- drop the pre-warmed buffer, don't process."""
+        self._recording = False
+        try:
+            wav_path = self.recorder.stop(self._session_dir / "audio.wav")
+            wav_path.unlink(missing_ok=True)
+        except Exception:
+            pass  # nothing to clean up if the recorder never captured anything
 
     def _on_screenshot(self):
         if self._session_dir:
