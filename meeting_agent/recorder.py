@@ -7,7 +7,12 @@ import numpy as np
 import soundcard as sc
 
 SAMPLE_RATE = 16000
-CHUNK_FRAMES = 1024
+# 4096 frames (256ms) instead of 1024 (64ms): fewer, larger blocking record() calls
+# per second means less exposure to GIL contention with the Qt UI thread between
+# calls -- a stall inside a 64ms window was enough to risk a buffer xrun (audible
+# as a click/crackle); a 256ms window has far more slack. Costs ~200ms of extra
+# latency on Stop, which is unnoticeable for a "stop the recording" button.
+CHUNK_FRAMES = 4096
 
 # Loopback (system/meeting audio) and mic (room noise) are rarely at comparable
 # volume -- e.g. system volume at 38% vs. a normally-gained mic means a flat
@@ -16,6 +21,12 @@ CHUNK_FRAMES = 1024
 TARGET_RMS = 0.05
 MIN_RMS_TO_NORMALIZE = 0.001  # below this, treat as silence -- don't amplify noise floor
 MAX_GAIN = 10.0  # cap so a near-silent channel doesn't get blown up into full-scale hiss
+# Ceiling on the boosted peak, not just RMS: two channels each normalized by RMS
+# alone can still have a high crest factor (quiet body, loud transients), and
+# summing two such boosted signals can exceed +-1 and hard-clip -- audible as
+# harsh crackle. Capping each channel's peak to 0.45 guarantees their sum can't
+# exceed 0.9, so the final np.clip below is never actually reached by real audio.
+PEAK_HEADROOM = 0.45
 
 
 def _normalize(x: np.ndarray) -> np.ndarray:
@@ -23,6 +34,9 @@ def _normalize(x: np.ndarray) -> np.ndarray:
     if rms < MIN_RMS_TO_NORMALIZE:
         return x
     gain = min(TARGET_RMS / rms, MAX_GAIN)
+    peak = np.abs(x).max()
+    if peak > 0:
+        gain = min(gain, PEAK_HEADROOM / peak)
     return x * gain
 
 
