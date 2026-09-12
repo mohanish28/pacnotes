@@ -1,6 +1,7 @@
 PySide6
 soundcard
 numpy
+scipy
 mss
 faster-whisper
 google-genai

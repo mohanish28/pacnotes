@@ -5,14 +5,21 @@ from pathlib import Path
 
 import numpy as np
 import soundcard as sc
+from scipy.signal import resample_poly
 
-SAMPLE_RATE = 16000
-# 4096 frames (256ms) instead of 1024 (64ms): fewer, larger blocking record() calls
-# per second means less exposure to GIL contention with the Qt UI thread between
-# calls -- a stall inside a 64ms window was enough to risk a buffer xrun (audible
-# as a click/crackle); a 256ms window has far more slack. Costs ~200ms of extra
+SAMPLE_RATE = 16000  # what faster-whisper wants and what the final WAV is written at
+# PipeWire's shared graph runs at 48kHz (its documented default clock rate).
+# Requesting SAMPLE_RATE directly from soundcard means every chunk gets resampled
+# 48kHz->16kHz inline in the live capture path. Capturing at the graph's native
+# rate instead means zero client-side resampling while audio is actually being
+# streamed, and a single proper polyphase resample (see stop()) afterward.
+CAPTURE_RATE = 48000
+# 12288 frames = 256ms at the 48kHz capture rate: fewer, larger blocking record()
+# calls per second means less exposure to GIL contention with the Qt UI thread
+# between calls -- a stall inside a narrow window risks a buffer xrun (audible as
+# a click/crackle); a wider window has far more slack. Costs ~256ms of extra
 # latency on Stop, which is unnoticeable for a "stop the recording" button.
-CHUNK_FRAMES = 4096
+CHUNK_FRAMES = 12288
 
 # Loopback (system/meeting audio) and mic (room noise) are rarely at comparable
 # volume -- e.g. system volume at 38% vs. a normally-gained mic means a flat
@@ -66,7 +73,7 @@ class Recorder:
         try:
             speaker = sc.default_speaker()
             loopback_mic = sc.get_microphone(id=str(speaker.name), include_loopback=True)
-            with loopback_mic.recorder(samplerate=SAMPLE_RATE, channels=1) as rec:
+            with loopback_mic.recorder(samplerate=CAPTURE_RATE, channels=1) as rec:
                 while not self._stop_event.is_set():
                     self._loopback_chunks.append(rec.record(numframes=CHUNK_FRAMES))
         except Exception as e:
@@ -79,7 +86,7 @@ class Recorder:
     def _record_mic(self):
         try:
             mic = sc.default_microphone()
-            with mic.recorder(samplerate=SAMPLE_RATE, channels=1) as rec:
+            with mic.recorder(samplerate=CAPTURE_RATE, channels=1) as rec:
                 while not self._stop_event.is_set():
                     self._mic_chunks.append(rec.record(numframes=CHUNK_FRAMES))
         except Exception:
@@ -95,6 +102,16 @@ class Recorder:
 
         if not self._loopback_chunks and not self.loopback_error:
             self.loopback_error = "No loopback audio captured (0 chunks)."
+
+        # Single clean polyphase resample 48kHz -> 16kHz now, instead of the
+        # continuous inline resampling soundcard would otherwise do per chunk
+        # during live capture (see CAPTURE_RATE comment above).
+        assert CAPTURE_RATE % SAMPLE_RATE == 0, "resample_poly needs an integer ratio"
+        down = CAPTURE_RATE // SAMPLE_RATE
+        if len(loopback) > 0:
+            loopback = resample_poly(loopback, up=1, down=down, axis=0)
+        if len(mic) > 0:
+            mic = resample_poly(mic, up=1, down=down, axis=0)
 
         length = max(len(loopback), len(mic))
         if length == 0:
