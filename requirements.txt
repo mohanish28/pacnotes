@@ -1,0 +1,12 @@
+PySide6
+soundcard
+numpy
+mss
+faster-whisper
+google-genai
+markdown
+xhtml2pdf
+Pillow
+psutil
+pygetwindow
+boto3
