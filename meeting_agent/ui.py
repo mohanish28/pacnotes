@@ -175,6 +175,7 @@ class Controller:
         self._screenshots: list[Path] = []
         self._floating_bar: FloatingBar | None = None
         self._worker: PipelineWorker | None = None
+        self._active_popup: TakeNotesPopup | None = None
 
     def start(self):
         self.detector.start()
@@ -198,18 +199,27 @@ class Controller:
     def _on_meeting_detected(self, platform: str):
         if self._recording:
             return
-        # Start capturing before the popup even shows: opening the audio streams
-        # has a ~1.5-2s fixed connection latency, so pre-warming it here overlaps
-        # that gap with the user reading/clicking the popup instead of losing the
-        # first couple seconds of the meeting.
-        self._begin_capture(platform)
+        # Capture must not start until the user explicitly consents (Yes). A
+        # prior version pre-warmed the audio streams while the popup was still
+        # showing to hide stream-connection latency -- that recorded audio
+        # before consent and, if the meeting ended before the user answered,
+        # could get processed and emailed with no consent ever given. Reverted:
+        # the ~1.5-2s stream-connection latency is now eaten after Yes instead.
         popup = TakeNotesPopup(platform)
-        if popup.exec() == QDialog.Accepted:
+        self._active_popup = popup
+        accepted = popup.exec() == QDialog.Accepted
+        self._active_popup = None
+        if accepted:
+            self._begin_capture(platform)
             self._show_floating_bar()
-        else:
-            self._discard_capture()
 
     def _on_meeting_ended(self):
+        if self._active_popup is not None:
+            # Meeting vanished while "Take notes?" was still up and unanswered
+            # -- close it rather than let a stale popup accept into a dead
+            # meeting (or, with pre-warmed capture, process without consent).
+            self._active_popup.reject()
+            return
         if self._recording:
             self._stop_and_process()
 
@@ -226,15 +236,6 @@ class Controller:
         self._floating_bar.screenshot_clicked.connect(self._on_screenshot)
         self._floating_bar.stop_clicked.connect(self._stop_and_process)
         self._floating_bar.show()
-
-    def _discard_capture(self):
-        """User clicked No on the popup -- drop the pre-warmed buffer, don't process."""
-        self._recording = False
-        try:
-            wav_path = self.recorder.stop(self._session_dir / "audio.wav")
-            wav_path.unlink(missing_ok=True)
-        except Exception:
-            pass  # nothing to clean up if the recorder never captured anything
 
     def _on_screenshot(self):
         if self._session_dir:
