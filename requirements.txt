@@ -8,5 +8,6 @@ markdown
 xhtml2pdf
 Pillow
 psutil
-pygetwindow
+pygetwindow; sys_platform == "win32"
+python-xlib; sys_platform == "linux"
 boto3

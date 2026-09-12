@@ -1,22 +1,85 @@
-"""Polls window titles to detect the start/end of a Zoom / Meet / Teams call."""
+"""Polls window titles to detect the start/end of a Zoom / Meet / Teams call.
+
+Windows uses pygetwindow. Linux has no pygetwindow support at all (it raises
+NotImplementedError on import), so it enumerates X11 windows directly via Xlib
+instead — this only sees X11 and XWayland-mapped windows. On a pure-Wayland
+session with no X11 windows (e.g. stock GNOME Wayland with native-Wayland apps),
+title enumeration returns nothing and auto-detection silently never fires; the
+tray's "Take notes now" still works manually.
+"""
+import sys
+
 from PySide6.QtCore import QThread, Signal
-import pygetwindow as gw
 
 POLL_INTERVAL_SEC = 2.0
 CONFIRM_POLLS = 2  # consecutive matching polls required before firing an event
 
 
+def _classify_title(title: str) -> str | None:
+    if not title:
+        return None
+    if title == "Zoom Meeting":
+        return "Zoom"
+    if "Meet -" in title:
+        return "Google Meet"
+    if "Microsoft Teams" in title and "Meeting" in title:
+        return "Microsoft Teams"
+    return None
+
+
+def _all_window_titles_windows() -> list[str]:
+    import pygetwindow as gw
+
+    return [w.title for w in gw.getAllWindows()]
+
+
+_x11_display = None
+_x11_unsupported = False
+
+
+def _all_window_titles_linux() -> list[str]:
+    # ponytail: X11/XWayland only, no wlr-foreign-toplevel or GNOME "Window Calls"
+    # support; add one of those if native-Wayland detection is ever needed.
+    global _x11_display, _x11_unsupported
+    if _x11_unsupported:
+        return []
+    try:
+        from Xlib import display
+        from Xlib.error import XError
+
+        if _x11_display is None:
+            _x11_display = display.Display()
+        root = _x11_display.screen().root
+        net_client_list = _x11_display.intern_atom("_NET_CLIENT_LIST")
+        net_wm_name = _x11_display.intern_atom("_NET_WM_NAME")
+        client_list = root.get_full_property(net_client_list, 0)
+        if client_list is None:
+            return []
+
+        titles = []
+        for window_id in client_list.value:
+            try:
+                window = _x11_display.create_resource_object("window", window_id)
+                name_prop = window.get_full_property(net_wm_name, 0)
+            except XError:
+                continue
+            if name_prop and name_prop.value:
+                value = name_prop.value
+                titles.append(value.decode("utf-8", "ignore") if isinstance(value, bytes) else value)
+        return titles
+    except Exception:
+        # No X11 display (e.g. python-xlib missing, or a pure-Wayland session
+        # with no XWayland root) -> detection degrades to manual trigger only.
+        _x11_unsupported = True
+        return []
+
+
 def _current_meeting_platform() -> str | None:
-    for window in gw.getAllWindows():
-        title = window.title
-        if not title:
-            continue
-        if title == "Zoom Meeting":
-            return "Zoom"
-        if "Meet -" in title:
-            return "Google Meet"
-        if "Microsoft Teams" in title and "Meeting" in title:
-            return "Microsoft Teams"
+    titles = _all_window_titles_windows() if sys.platform == "win32" else _all_window_titles_linux()
+    for title in titles:
+        platform = _classify_title(title)
+        if platform:
+            return platform
     return None
 
 
