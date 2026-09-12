@@ -11,11 +11,14 @@ The user only ever sees a "Take notes?" popup and a small floating control bar.
 ### 1. Gemini API key
 Get one from https://aistudio.google.com/apikey.
 
-### 2. Gmail App Password
-Regular Gmail passwords don't work with SMTP. Create an App Password:
-1. Enable 2-Step Verification on the Google account: https://myaccount.google.com/security
-2. Go to https://myaccount.google.com/apppasswords
-3. Create an app password for "Mail" and copy the 16-character code.
+### 2. SMTP relay (Brevo, or any other provider)
+Email delivery is generic SMTP (STARTTLS), so any relay works. For Brevo:
+1. Brevo dashboard → SMTP & API → SMTP tab, to get your SMTP credentials.
+2. Fill in Settings: `smtp_host` = `smtp-relay.brevo.com`, `smtp_port` = `587`,
+   `smtp_login` = the generated login (looks like `xxxxx@smtp-brevo.com`),
+   `smtp_password` = the SMTP key, `sender_email` = an address verified as a
+   sender in your Brevo account (this is the "From" address, separate from the
+   login).
 
 ### 3. Cloudflare R2 (PDF/audio delivery)
 1. In the Cloudflare dashboard, go to R2 → create a bucket.

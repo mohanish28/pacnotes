@@ -86,7 +86,7 @@ class FloatingBar(QWidget):
         super().closeEvent(event)
 
 
-SECRET_FIELDS = {"gemini_api_key", "gmail_app_password", "r2_secret_access_key"}
+SECRET_FIELDS = {"gemini_api_key", "smtp_password", "r2_secret_access_key"}
 BOOL_FIELDS = {"auto_email", "keep_audio"}
 
 

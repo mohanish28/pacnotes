@@ -1,9 +1,10 @@
-"""Emails the recipient a link to the uploaded meeting notes PDF via Gmail SMTP."""
+"""Emails the recipient a link to the uploaded meeting notes PDF via SMTP.
+
+Generic SMTP (STARTTLS) rather than Gmail-specific -- works with Brevo, SES,
+or any other SMTP relay by pointing smtp_host/port/login/password at it.
+"""
 import smtplib
 from email.mime.text import MIMEText
-
-SMTP_HOST = "smtp.gmail.com"
-SMTP_PORT = 465
 
 
 def send_notification_email(cfg: dict, platform: str, pdf_url: str, audio_url: str | None) -> None:
@@ -19,9 +20,10 @@ def send_notification_email(cfg: dict, platform: str, pdf_url: str, audio_url: s
 
     msg = MIMEText("\n".join(lines))
     msg["Subject"] = f"Meeting Notes - {platform}"
-    msg["From"] = cfg["gmail_address"]
+    msg["From"] = cfg["sender_email"]
     msg["To"] = cfg["recipient_email"]
 
-    with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT) as server:
-        server.login(cfg["gmail_address"], cfg["gmail_app_password"])
-        server.sendmail(cfg["gmail_address"], [cfg["recipient_email"]], msg.as_string())
+    with smtplib.SMTP(cfg["smtp_host"], cfg["smtp_port"]) as server:
+        server.starttls()
+        server.login(cfg["smtp_login"], cfg["smtp_password"])
+        server.sendmail(cfg["sender_email"], [cfg["recipient_email"]], msg.as_string())

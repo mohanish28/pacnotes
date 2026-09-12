@@ -10,8 +10,11 @@ from pathlib import Path
 DEFAULTS = {
     "gemini_api_key": "",
     "gemini_model": "gemini-3.6-flash",
-    "gmail_address": "",
-    "gmail_app_password": "",
+    "smtp_host": "",
+    "smtp_port": 587,
+    "smtp_login": "",
+    "smtp_password": "",
+    "sender_email": "",
     "recipient_email": "",
     "whisper_model": "small",
     "output_dir": str(Path.home() / "MeetingNotes"),
@@ -26,8 +29,10 @@ DEFAULTS = {
 # Fields that must be non-empty before the pipeline can run end to end.
 REQUIRED_FIELDS = [
     "gemini_api_key",
-    "gmail_address",
-    "gmail_app_password",
+    "smtp_host",
+    "smtp_login",
+    "smtp_password",
+    "sender_email",
     "recipient_email",
     "r2_account_id",
     "r2_access_key_id",
