@@ -104,6 +104,14 @@ for manual launching, and a copy in `~/.config/autostart/` so it starts
 automatically on login. Re-run it any time after moving the checkout or
 rebuilding `.venv`. Requires `.venv` to already exist (see step 4 above).
 
+### Linux `meeting-agent` command
+```
+./scripts/install_cli_linux.sh
+```
+Installs `meeting-agent` to `~/.local/bin`, so you can just type `meeting-agent`
+from any directory/terminal to launch it (no `cd`, no venv activation). If
+config is incomplete it opens the Settings dialog same as any other launch.
+
 ## Notes
 - CUDA is used for transcription automatically if available, otherwise it falls
   back to CPU (`transcriber.py`).
