@@ -2,7 +2,8 @@ PySide6
 soundcard
 numpy
 scipy
-mss
+mss; sys_platform == "win32"
+jeepney; sys_platform == "linux"
 faster-whisper
 google-genai
 markdown

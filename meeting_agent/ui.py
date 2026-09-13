@@ -238,8 +238,12 @@ class Controller:
         self._floating_bar.show()
 
     def _on_screenshot(self):
-        if self._session_dir:
+        if not self._session_dir:
+            return
+        try:
             self._screenshots.append(screenshotter.take_screenshot(self._session_dir))
+        except Exception as e:
+            self.tray.showMessage("Screenshot Failed", str(e), QSystemTrayIcon.Warning)
 
     def _stop_and_process(self):
         if not self._recording:
