@@ -5,6 +5,7 @@ or any other SMTP relay by pointing smtp_host/port/login/password at it.
 """
 import smtplib
 from email.mime.text import MIMEText
+from email.utils import formatdate, make_msgid
 
 
 def send_notification_email(cfg: dict, platform: str, pdf_url: str, audio_url: str | None) -> None:
@@ -22,6 +23,13 @@ def send_notification_email(cfg: dict, platform: str, pdf_url: str, audio_url: s
     msg["Subject"] = f"Meeting Notes - {platform}"
     msg["From"] = cfg["sender_email"]
     msg["To"] = cfg["recipient_email"]
+    # RFC 5322 requires Date and treats Message-ID as standard practice; Python's
+    # email lib adds neither automatically. Confirmed live via SMTP debug trace
+    # that our raw DATA payload had no Date header at all -- a well-known signal
+    # strict receivers (Gmail included) use to silently drop an otherwise-valid,
+    # relay-accepted message with no bounce.
+    msg["Date"] = formatdate(localtime=True)
+    msg["Message-ID"] = make_msgid(domain=cfg["sender_email"].split("@")[-1])
 
     with smtplib.SMTP(cfg["smtp_host"], cfg["smtp_port"]) as server:
         server.starttls()
