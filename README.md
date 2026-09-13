@@ -37,8 +37,8 @@ pip install -r requirements.txt
 python -m meeting_agent
 ```
 On first run it opens a Settings dialog since the config is empty. Fill in the
-Gemini key, Gmail address + app password, recipient email, and the four R2 fields,
-then Save. After that it lives in the system tray.
+Gemini key, the SMTP fields, recipient email, and the four R2 fields, then Save.
+After that it lives in the system tray.
 
 Config is stored at `%APPDATA%\MeetingAgent\config.json`.
 
@@ -76,6 +76,33 @@ with XWayland, etc.) auto-detection works normally.
 
 `pip install -r requirements.txt` picks the right window-detection dependency
 per OS automatically (`pygetwindow` on Windows, `python-xlib` on Linux).
+
+**Browsers on Wayland**: some browsers (confirmed: Google Chrome and Zen on
+Ubuntu 26.04/GNOME) render natively on Wayland by default, which makes them
+completely invisible to X11-based detection — not a title-matching issue,
+the browser produces zero X11 windows at all. If Google Meet/Teams in your
+browser never triggers the popup, force that browser to use XWayland:
+- **Chrome**: launch with `google-chrome --ozone-platform=x11`, or make it
+  permanent by copying `/usr/share/applications/google-chrome.desktop` to
+  `~/.local/share/applications/google-chrome.desktop` and adding
+  `--ozone-platform=x11` to each `Exec=` line (fully quit Chrome first —
+  it's single-instance, so a running process ignores new launch flags).
+- **Firefox-based browsers** (Zen, Firefox): set `MOZ_ENABLE_WAYLAND=0`
+  before launching.
+
+Screenshots (the floating bar's 📷 button) have the same root cause on
+Wayland: `mss` reads pixels via X11, which the compositor doesn't expose.
+Fixed via the XDG Desktop Portal Screenshot API instead (see
+`screenshotter.py`) — no user setup needed, this one just works.
+
+### Linux autostart + desktop launcher
+```
+./scripts/setup_autostart_linux.sh
+```
+Installs a `.desktop` entry so Meeting Agent shows up in your app grid/search
+for manual launching, and a copy in `~/.config/autostart/` so it starts
+automatically on login. Re-run it any time after moving the checkout or
+rebuilding `.venv`. Requires `.venv` to already exist (see step 4 above).
 
 ## Notes
 - CUDA is used for transcription automatically if available, otherwise it falls
