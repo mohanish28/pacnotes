@@ -2,7 +2,7 @@
 import time
 from pathlib import Path
 
-from . import emailer, enhancer, pdf_report, storage, transcriber
+from . import emailer, enhancer, meetings, pdf_report, storage, transcriber
 
 
 class PipelineError(Exception):
@@ -57,4 +57,5 @@ def run_pipeline(wav_path: Path, screenshots: list[Path], cfg: dict, platform: s
         except OSError:
             pass  # best-effort cleanup, not worth failing the pipeline over
 
+    meetings.add_meeting(platform, pdf_path, pdf_url, audio_url)
     return PipelineResult(pdf_path, pdf_url)
