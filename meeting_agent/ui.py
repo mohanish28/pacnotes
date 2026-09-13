@@ -320,6 +320,12 @@ class Controller:
     def _quit(self):
         self.detector.stop()
         self.detector.wait(2000)
+        if self._worker is not None and self._worker.isRunning():
+            # Tearing down the app while the pipeline QThread is still alive
+            # crashes with "QThread: Destroyed while thread is still running"
+            # (reproduced live). Pipeline steps are all network/CPU calls with
+            # no natural cancellation point, so wait for it rather than kill it.
+            self._worker.wait(30000)
         QApplication.quit()
 
     def _open_settings(self):

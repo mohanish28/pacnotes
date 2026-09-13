@@ -4,6 +4,7 @@ from pathlib import Path
 
 import markdown
 from xhtml2pdf import pisa
+from xhtml2pdf.config.resources import ResourceAccessPolicy
 
 CSS = """
 <style>
@@ -13,7 +14,11 @@ CSS = """
   table { border-collapse: collapse; width: 100%; margin-top: 8px; }
   th, td { border: 1px solid #999; padding: 6px 8px; text-align: left; font-size: 10pt; }
   th { background-color: #eee; }
-  .screenshot { width: 100%; margin: 10px 0 18px 0; }
+  /* xhtml2pdf silently mis-renders percentage widths on <img> -- the image
+     embeds correctly (confirmed via pypdf: right byte count, right pixel
+     data) but never actually appears on the page. A fixed px width is the
+     one that reliably renders; 500px fits one page with margin to spare. */
+  .screenshot { width: 500px; margin: 10px 0 18px 0; }
 </style>
 """
 
@@ -37,8 +42,16 @@ def render_pdf(markdown_notes: str, screenshots: list[Path], output_path: Path) 
     html = f"<html><head>{CSS}</head><body>{body_html}{screenshots_html}</body></html>"
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    # xhtml2pdf 's default resource policy confines local <img> reads to the
+    # current working directory (an SSRF/local-file-disclosure guard) --
+    # screenshots live in the session dir under output_dir, not necessarily
+    # the process cwd, so that default silently drops every screenshot
+    # instead of raising (confirmed live: PDF built "successfully" with the
+    # image missing). Explicitly allow each screenshot's own directory.
+    extra_roots = tuple({shot.resolve().parent for shot in screenshots})
+    policy = ResourceAccessPolicy(extra_roots=extra_roots)
     with open(output_path, "wb") as f:
-        result = pisa.CreatePDF(html, dest=f, link_callback=_link_callback)
+        result = pisa.CreatePDF(html, dest=f, link_callback=_link_callback, resource_policy=policy)
 
     if result.err:
         raise RuntimeError(f"PDF generation failed with {result.err} error(s).")
