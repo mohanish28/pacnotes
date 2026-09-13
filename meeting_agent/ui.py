@@ -2,45 +2,143 @@
 import time
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer, Signal, QThread
-from PySide6.QtGui import QIcon
+from PySide6.QtCore import QRectF, Qt, QTimer, Signal, QThread
+from PySide6.QtGui import QColor, QIcon, QLinearGradient, QPainter, QPainterPath
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QDialog, QFormLayout, QHBoxLayout, QLabel,
-    QLineEdit, QMenu, QMessageBox, QPushButton, QStyle, QSystemTrayIcon,
-    QVBoxLayout, QWidget,
+    QApplication, QCheckBox, QDialog, QFormLayout, QGraphicsDropShadowEffect,
+    QHBoxLayout, QLabel, QLineEdit, QMenu, QMessageBox, QPushButton,
+    QSystemTrayIcon, QVBoxLayout, QWidget,
 )
 
 from . import config as config_module
 from . import screenshotter
 from .detector import MeetingDetector
+from .icons import ACCENT_YELLOW, BG_BOTTOM, BG_TOP, INK_WHITE, app_icon
 from .pipeline import PipelineError, run_pipeline
 from .recorder import Recorder
 
+PANEL_RADIUS = 18
 
-def _app_icon() -> QIcon:
-    # No shipped asset -> reuse a built-in Qt icon rather than adding an image file.
-    return QApplication.style().standardIcon(QStyle.SP_ComputerIcon)
+
+def _paint_rounded_panel(widget: QWidget, top: QColor, bottom: QColor):
+    """Fill `widget`'s background with a rounded, vertically-gradiented panel.
+
+    Frameless top-level widgets render square by default; this + WA_Translucent
+    Background is the standard Qt way to get a rounded custom-chrome window.
+    """
+    painter = QPainter(widget)
+    painter.setRenderHint(QPainter.Antialiasing)
+    path = QPainterPath()
+    path.addRoundedRect(QRectF(widget.rect()), PANEL_RADIUS, PANEL_RADIUS)
+    gradient = QLinearGradient(0, 0, 0, widget.height())
+    gradient.setColorAt(0, top)
+    gradient.setColorAt(1, bottom)
+    painter.fillPath(path, gradient)
+
+
+def _add_drop_shadow(widget: QWidget):
+    shadow = QGraphicsDropShadowEffect(widget)
+    shadow.setBlurRadius(28)
+    shadow.setOffset(0, 6)
+    shadow.setColor(QColor(0, 0, 0, 140))
+    widget.setGraphicsEffect(shadow)
+
+
+class PacmanWidget(QWidget):
+    """The animated companion: a small chomping Pac-Man, purely vector-drawn."""
+
+    MIN_MOUTH_DEG = 4
+    MAX_MOUTH_DEG = 34
+
+    def __init__(self, diameter: int = 36, parent=None):
+        super().__init__(parent)
+        self._diameter = diameter
+        self.setFixedSize(diameter, diameter)
+        self._mouth_deg = self.MAX_MOUTH_DEG
+        self._opening = False
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._animate)
+        self._timer.start(110)
+
+    def _animate(self):
+        step = 5
+        if self._opening:
+            self._mouth_deg = min(self._mouth_deg + step, self.MAX_MOUTH_DEG)
+            if self._mouth_deg >= self.MAX_MOUTH_DEG:
+                self._opening = False
+        else:
+            self._mouth_deg = max(self._mouth_deg - step, self.MIN_MOUTH_DEG)
+            if self._mouth_deg <= self.MIN_MOUTH_DEG:
+                self._opening = True
+        self.update()
+
+    def stop(self):
+        self._timer.stop()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setBrush(ACCENT_YELLOW)
+        painter.setPen(Qt.NoPen)
+        rect = QRectF(2, 2, self._diameter - 4, self._diameter - 4)
+        start_angle = int(self._mouth_deg * 16)
+        span_angle = int((360 - 2 * self._mouth_deg) * 16)
+        painter.drawPie(rect, start_angle, span_angle)
+
+
+def _pill_button(text: str, bg: str, fg: str = "#FFFFFF") -> QPushButton:
+    btn = QPushButton(text)
+    btn.setCursor(Qt.PointingHandCursor)
+    btn.setStyleSheet(f"""
+        QPushButton {{
+            background-color: {bg}; color: {fg}; border: none;
+            border-radius: 10px; padding: 7px 16px; font-weight: 600;
+        }}
+        QPushButton:hover {{ background-color: {bg}dd; }}
+        QPushButton:pressed {{ background-color: {bg}aa; }}
+    """)
+    return btn
 
 
 class TakeNotesPopup(QDialog):
     def __init__(self, platform: str):
         super().__init__()
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
-        self.setFixedSize(300, 120)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setFixedSize(320, 150)
+        _add_drop_shadow(self)
 
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel(f"{platform} meeting detected.\nTake notes?"))
+        layout.setContentsMargins(22, 20, 22, 18)
+        layout.setSpacing(14)
+
+        header = QHBoxLayout()
+        header.addWidget(PacmanWidget(34))
+        title = QLabel(f"{platform} meeting detected")
+        title.setStyleSheet(f"color: {INK_WHITE.name()}; font-size: 14pt; font-weight: 700;")
+        header.addWidget(title)
+        header.addStretch()
+        layout.addLayout(header)
+
+        subtitle = QLabel("Want me to take notes for this one?")
+        subtitle.setStyleSheet(f"color: {INK_WHITE.name()}; font-size: 10.5pt;")
+        layout.addWidget(subtitle)
+        layout.addStretch()
 
         buttons = QHBoxLayout()
-        yes_btn = QPushButton("Yes")
-        no_btn = QPushButton("No")
-        yes_btn.clicked.connect(self.accept)
+        buttons.addStretch()
+        no_btn = _pill_button("Not now", "#5A4E85")
+        yes_btn = _pill_button("Yes, record", "#2ECC71")
         no_btn.clicked.connect(self.reject)
-        buttons.addWidget(yes_btn)
+        yes_btn.clicked.connect(self.accept)
         buttons.addWidget(no_btn)
+        buttons.addWidget(yes_btn)
         layout.addLayout(buttons)
 
         self._center_on_screen()
+
+    def paintEvent(self, event):
+        _paint_rounded_panel(self, BG_TOP, BG_BOTTOM)
 
     def _center_on_screen(self):
         screen = QApplication.primaryScreen().geometry()
@@ -51,30 +149,68 @@ class FloatingBar(QWidget):
     screenshot_clicked = Signal()
     stop_clicked = Signal()
 
+    STATUS_DEFAULT = "Listening for what matters..."
+
     def __init__(self):
         super().__init__()
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
-        self.setFixedSize(260, 50)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setFixedSize(360, 64)
+        _add_drop_shadow(self)
 
         self._elapsed = 0
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
         self._timer.start(1000)
+        self._status_reset_timer = QTimer(self)
+        self._status_reset_timer.setSingleShot(True)
+        self._status_reset_timer.timeout.connect(lambda: self.status_label.setText(self.STATUS_DEFAULT))
 
         layout = QHBoxLayout(self)
-        self.timer_label = QLabel("REC 00:00")
-        screenshot_btn = QPushButton("📷 Screenshot")
-        stop_btn = QPushButton("⏹ Stop & Send")
+        layout.setContentsMargins(14, 10, 14, 10)
+        layout.setSpacing(10)
 
-        screenshot_btn.clicked.connect(self.screenshot_clicked.emit)
+        self.pacman = PacmanWidget(36)
+        layout.addWidget(self.pacman)
+
+        text_col = QVBoxLayout()
+        text_col.setSpacing(2)
+        rec_row = QHBoxLayout()
+        rec_row.setSpacing(6)
+        dot = QLabel("●")
+        dot.setStyleSheet("color: #FF5C5C; font-size: 9pt;")
+        self.timer_label = QLabel("REC 00:00")
+        self.timer_label.setStyleSheet(f"color: {INK_WHITE.name()}; font-weight: 700; font-size: 10.5pt;")
+        rec_row.addWidget(dot)
+        rec_row.addWidget(self.timer_label)
+        rec_row.addStretch()
+        text_col.addLayout(rec_row)
+        self.status_label = QLabel(self.STATUS_DEFAULT)
+        self.status_label.setStyleSheet("color: #C9BFEE; font-size: 8.5pt;")
+        text_col.addWidget(self.status_label)
+        layout.addLayout(text_col)
+        layout.addStretch()
+
+        screenshot_btn = _pill_button("📷", "#5A4E85")
+        screenshot_btn.setFixedWidth(40)
+        stop_btn = _pill_button("⏹ Stop", "#E74C3C")
+
+        screenshot_btn.clicked.connect(self._on_screenshot_clicked)
         stop_btn.clicked.connect(self.stop_clicked.emit)
 
-        layout.addWidget(self.timer_label)
         layout.addWidget(screenshot_btn)
         layout.addWidget(stop_btn)
 
         screen = QApplication.primaryScreen().geometry()
         self.move(screen.right() - self.width() - 20, screen.top() + 20)
+
+    def paintEvent(self, event):
+        _paint_rounded_panel(self, BG_TOP, BG_BOTTOM)
+
+    def _on_screenshot_clicked(self):
+        self.status_label.setText("📸 Got it!")
+        self._status_reset_timer.start(2000)
+        self.screenshot_clicked.emit()
 
     def _tick(self):
         self._elapsed += 1
@@ -83,6 +219,7 @@ class FloatingBar(QWidget):
 
     def closeEvent(self, event):
         self._timer.stop()
+        self.pacman.stop()
         super().closeEvent(event)
 
 
@@ -160,7 +297,7 @@ class Controller:
         self.detector.meeting_detected.connect(self._on_meeting_detected)
         self.detector.meeting_ended.connect(self._on_meeting_ended)
 
-        self.tray = QSystemTrayIcon(_app_icon())
+        self.tray = QSystemTrayIcon(app_icon())
         self.tray.setToolTip("Meeting Agent")
         menu = QMenu()
         menu.addAction("Take notes now", self._on_manual_trigger)
