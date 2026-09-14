@@ -1,0 +1,51 @@
+name: Build Windows executable
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [master]
+    paths:
+      - "meeting_agent/**"
+      - "requirements.txt"
+      - "run_meeting_agent.py"
+      - "meeting-notes-prompt.md"
+      - "svg/**"
+      - ".github/workflows/build-windows.yml"
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build MeetingAgent.exe
+        shell: bash
+        run: |
+          pyinstaller --noconfirm --onefile --noconsole --name MeetingAgent \
+            --add-data "meeting-notes-prompt.md;." \
+            --add-data "svg;svg" \
+            --collect-all faster_whisper \
+            --collect-all ctranslate2 \
+            --collect-all google.genai \
+            --collect-all googleapiclient \
+            --collect-all google_auth_oauthlib \
+            --collect-all reportlab \
+            --collect-all xhtml2pdf \
+            run_meeting_agent.py
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MeetingAgent-windows
+          path: dist/MeetingAgent.exe
+          if-no-files-found: error
