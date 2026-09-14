@@ -1,8 +1,8 @@
-"""End-to-end processing: audio -> transcript -> Gemini notes -> PDF -> R2 -> email."""
+"""End-to-end processing: audio -> transcript -> Gemini notes -> PDF -> storage -> email."""
 import time
 from pathlib import Path
 
-from . import emailer, enhancer, meetings, pdf_report, storage, transcriber
+from . import drive_storage, emailer, enhancer, meetings, pdf_report, storage, transcriber
 
 
 class PipelineError(Exception):
@@ -20,7 +20,15 @@ class PipelineResult:
         self.pdf_url = pdf_url
 
 
-def run_pipeline(wav_path: Path, screenshots: list[Path], cfg: dict, platform: str) -> PipelineResult:
+def _storage_backend(cfg: dict):
+    return drive_storage if cfg["storage_backend"] == "drive" else storage
+
+
+def run_pipeline(
+    wav_path: Path, screenshots: list[Path], cfg: dict, platform: str, meeting_title: str | None = None
+) -> PipelineResult:
+    label = meeting_title or platform
+
     try:
         transcript = transcriber.transcribe(wav_path, cfg["whisper_model"])
     except Exception as e:
@@ -39,15 +47,16 @@ def run_pipeline(wav_path: Path, screenshots: list[Path], cfg: dict, platform: s
     except Exception as e:
         raise PipelineError("PDF rendering", e) from e
 
+    backend = _storage_backend(cfg)
     try:
-        pdf_url = storage.upload_and_get_link(pdf_path, cfg)
-        audio_url = storage.upload_and_get_link(wav_path, cfg) if cfg["keep_audio"] else None
+        pdf_url = backend.upload_and_get_link(pdf_path, cfg)
+        audio_url = backend.upload_and_get_link(wav_path, cfg) if cfg["keep_audio"] else None
     except Exception as e:
-        raise PipelineError("Cloudflare R2 upload", e) from e
+        raise PipelineError(f"{cfg['storage_backend'].upper()} upload", e) from e
 
     if cfg["auto_email"]:
         try:
-            emailer.send_notification_email(cfg, platform, pdf_url, audio_url)
+            emailer.send_notification_email(cfg, label, pdf_url, audio_url)
         except Exception as e:
             raise PipelineError("Email delivery", e) from e
 
@@ -57,5 +66,5 @@ def run_pipeline(wav_path: Path, screenshots: list[Path], cfg: dict, platform: s
         except OSError:
             pass  # best-effort cleanup, not worth failing the pipeline over
 
-    meetings.add_meeting(platform, pdf_path, pdf_url, audio_url)
+    meetings.add_meeting(label, pdf_path, pdf_url, audio_url)
     return PipelineResult(pdf_path, pdf_url)

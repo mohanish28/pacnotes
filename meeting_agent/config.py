@@ -10,35 +10,24 @@ from pathlib import Path
 DEFAULTS = {
     "gemini_api_key": "",
     "gemini_model": "gemini-3.6-flash",
-    "smtp_host": "",
-    "smtp_port": 587,
-    "smtp_login": "",
-    "smtp_password": "",
-    "sender_email": "",
     "recipient_email": "",
     "whisper_model": "small",
     "output_dir": str(Path.home() / "MeetingNotes"),
     "auto_email": True,
     "keep_audio": False,
+    "storage_backend": "r2",  # "r2" or "drive" -- drive just needs the shared Google OAuth below
     "r2_account_id": "",
     "r2_access_key_id": "",
     "r2_secret_access_key": "",
     "r2_bucket_name": "",
 }
 
-# Fields that must be non-empty before the pipeline can run end to end.
-REQUIRED_FIELDS = [
-    "gemini_api_key",
-    "smtp_host",
-    "smtp_login",
-    "smtp_password",
-    "sender_email",
-    "recipient_email",
-    "r2_account_id",
-    "r2_access_key_id",
-    "r2_secret_access_key",
-    "r2_bucket_name",
-]
+# Text fields that are always required, regardless of storage_backend.
+BASE_REQUIRED_FIELDS = ["gemini_api_key", "recipient_email"]
+
+# Only required when storage_backend == "r2"; Drive needs no extra fields,
+# just the Google OAuth connection every backend already needs for Gmail send.
+R2_REQUIRED_FIELDS = ["r2_account_id", "r2_access_key_id", "r2_secret_access_key", "r2_bucket_name"]
 
 
 def _config_dir() -> Path:
@@ -71,5 +60,15 @@ def save_config(cfg: dict) -> None:
         json.dump(cfg, f, indent=2)
 
 
+def missing_fields(cfg: dict) -> list[str]:
+    """Text config fields still empty, given the current storage_backend choice."""
+    required = list(BASE_REQUIRED_FIELDS)
+    if cfg.get("storage_backend") == "r2":
+        required += R2_REQUIRED_FIELDS
+    return [f for f in required if not cfg.get(f)]
+
+
 def is_config_complete(cfg: dict) -> bool:
-    return all(cfg.get(field) for field in REQUIRED_FIELDS)
+    from . import google_auth  # local import: google_auth imports _config_dir from this module
+
+    return not missing_fields(cfg) and google_auth.is_connected()

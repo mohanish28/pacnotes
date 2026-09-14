@@ -2,7 +2,9 @@
 
 Windows tray app that detects Zoom / Google Meet / Microsoft Teams calls, records
 speaker + mic audio, transcribes locally (faster-whisper), enhances the notes with
-Gemini, renders a PDF, uploads it to Cloudflare R2, and emails the recipient a link.
+Gemini, renders a PDF, uploads it (Cloudflare R2 or Google Drive, your choice), and
+emails the recipient a link via the Gmail API. Optionally looks up what's on your
+Google Calendar right now to title the recording with the real meeting name.
 
 The user only ever sees a "Take notes?" popup and a small floating control bar.
 
@@ -11,21 +13,43 @@ The user only ever sees a "Take notes?" popup and a small floating control bar.
 ### 1. Gemini API key
 Get one from https://aistudio.google.com/apikey.
 
-### 2. SMTP relay (Brevo, or any other provider)
-Email delivery is generic SMTP (STARTTLS), so any relay works. For Brevo:
-1. Brevo dashboard → SMTP & API → SMTP tab, to get your SMTP credentials.
-2. Fill in Settings: `smtp_host` = `smtp-relay.brevo.com`, `smtp_port` = `587`,
-   `smtp_login` = the generated login (looks like `xxxxx@smtp-brevo.com`),
-   `smtp_password` = the SMTP key, `sender_email` = an address verified as a
-   sender in your Brevo account (this is the "From" address, separate from the
-   login).
+### 2. Google Cloud OAuth (Gmail send + Calendar lookup + optional Drive storage)
+One OAuth grant covers all three. Narrow scopes on purpose (`gmail.send`,
+`calendar.readonly`, `drive.file`) — this app never reads your mail or your whole
+Drive, only sends and creates the files it uploads itself.
 
-### 3. Cloudflare R2 (PDF/audio delivery)
-1. In the Cloudflare dashboard, go to R2 → create a bucket.
+1. https://console.cloud.google.com/ → create a project (or reuse one).
+2. Enable these three APIs (each is Library → search → Enable):
+   - https://console.cloud.google.com/apis/library/gmail.googleapis.com
+   - https://console.cloud.google.com/apis/library/calendar-json.googleapis.com
+   - https://console.cloud.google.com/apis/library/drive.googleapis.com
+3. **OAuth consent screen** (sidebar): User type **External** → Create. App name
+   anything, your email for support/developer contact. On the Scopes step, "Add or
+   Remove Scopes" and paste in manually:
+   - `https://www.googleapis.com/auth/gmail.send`
+   - `https://www.googleapis.com/auth/calendar.readonly`
+   - `https://www.googleapis.com/auth/drive.file`
+
+   On the Test users step, add your own Google account. Leaving the app in
+   **Testing** status (not "Published") means Google never requires the full
+   sensitive-scope verification review — that's only for apps other people install.
+4. **Credentials** (sidebar) → Create Credentials → OAuth client ID → Application
+   type **Desktop app** → Create → **Download JSON**.
+5. Save that downloaded file as `google_credentials.json` in the same folder as
+   `config.json` (see below for the path; on Linux that's `~/.meeting_agent/`).
+6. In the app's Settings dialog, click **Connect Google Account** — opens a browser
+   for the one-time consent, then stores a refreshable token next to the config.
+
+### 3. Storage: Cloudflare R2 or Google Drive
+Pick one in Settings (`storage_backend`). Google Drive needs nothing beyond the
+OAuth connection above. For Cloudflare R2:
+1. Cloudflare dashboard → R2 → create a bucket.
 2. R2 → Manage API Tokens → create a token with read/write access to that bucket.
 3. Note down: **Account ID**, **Access Key ID**, **Secret Access Key**, and the
-   **bucket name**. The app uploads the PDF (and, if "keep audio" is on, the WAV)
-   and emails a link that expires after 7 days — no public bucket access needed.
+   **bucket name** — fill those four into Settings.
+
+Either way, the app uploads the PDF (and, if "keep audio" is on, the WAV) and
+emails a link that expires after 7 days — no public bucket access needed.
 
 ### 4. Install dependencies
 ```
@@ -37,10 +61,13 @@ pip install -r requirements.txt
 python -m meeting_agent
 ```
 On first run it opens a Settings dialog since the config is empty. Fill in the
-Gemini key, the SMTP fields, recipient email, and the four R2 fields, then Save.
-After that it lives in the system tray.
+Gemini key and recipient email, click **Connect Google Account**, pick a storage
+backend (and fill its R2 fields if you chose R2), then Save. After that it lives
+in the system tray.
 
-Config is stored at `%APPDATA%\MeetingAgent\config.json`.
+Config is stored at `%APPDATA%\MeetingAgent\config.json` (Windows) or
+`~/.meeting_agent/config.json` (Linux/Mac) — `google_credentials.json` and the
+OAuth token live in that same folder.
 
 ## Adding to Windows startup
 
@@ -112,9 +139,17 @@ Installs `meeting-agent` to `~/.local/bin`, so you can just type `meeting-agent`
 from any directory/terminal to launch it (no `cd`, no venv activation). If
 config is incomplete it opens the Settings dialog same as any other launch.
 
+## Dashboard
+Tray menu → **Dashboard**: lists past meetings (Open PDF / Copy Link / Delete),
+a **New meeting now** button (same manual-trigger path as the tray menu item),
+and a **Settings** button.
+
 ## Notes
 - CUDA is used for transcription automatically if available, otherwise it falls
   back to CPU (`transcriber.py`).
 - `whisper_model` in config can be `tiny`, `base`, `small`, `medium`, `large-v3`, etc.
-- Capture, transcription, Gemini, R2, and email failures never crash the app — they
-  show up as a tray notification.
+- Capture, transcription, Gemini, storage upload, and email failures never crash
+  the app — they show up as a tray notification.
+- Calendar title lookup is best-effort: if nothing's on your calendar right now,
+  or Google isn't connected, recordings just fall back to the platform name
+  (Zoom/Google Meet/Microsoft Teams/Manual).

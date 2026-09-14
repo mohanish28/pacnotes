@@ -5,12 +5,14 @@ from pathlib import Path
 from PySide6.QtCore import QRectF, Qt, QTimer, Signal, QThread
 from PySide6.QtGui import QColor, QIcon, QLinearGradient, QPainter, QPainterPath
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QDialog, QFormLayout, QGraphicsDropShadowEffect,
-    QHBoxLayout, QLabel, QLineEdit, QMenu, QMessageBox, QPushButton,
-    QSystemTrayIcon, QVBoxLayout, QWidget,
+    QApplication, QCheckBox, QComboBox, QDialog, QFormLayout,
+    QGraphicsDropShadowEffect, QHBoxLayout, QLabel, QLineEdit, QMenu,
+    QMessageBox, QPushButton, QSystemTrayIcon, QVBoxLayout, QWidget,
 )
 
+from . import calendar_lookup
 from . import config as config_module
+from . import google_auth
 from . import screenshotter
 from .detector import MeetingDetector
 from .icons import ACCENT_YELLOW, BG_BOTTOM, BG_TOP, INK_WHITE, app_icon
@@ -223,8 +225,9 @@ class FloatingBar(QWidget):
         super().closeEvent(event)
 
 
-SECRET_FIELDS = {"gemini_api_key", "smtp_password", "r2_secret_access_key"}
+SECRET_FIELDS = {"gemini_api_key", "r2_secret_access_key"}
 BOOL_FIELDS = {"auto_email", "keep_audio"}
+COMBO_FIELDS = {"storage_backend": ["r2", "drive"]}
 
 
 class SettingsDialog(QDialog):
@@ -235,10 +238,21 @@ class SettingsDialog(QDialog):
         self._inputs = {}
 
         layout = QFormLayout(self)
+
+        self._google_status = QLabel()
+        connect_btn = QPushButton("Connect Google Account")
+        connect_btn.clicked.connect(self._connect_google)
+        self._refresh_google_status()
+        layout.addRow(self._google_status, connect_btn)
+
         for field, default in config_module.DEFAULTS.items():
             if field in BOOL_FIELDS:
                 widget = QCheckBox()
                 widget.setChecked(bool(self.cfg.get(field, default)))
+            elif field in COMBO_FIELDS:
+                widget = QComboBox()
+                widget.addItems(COMBO_FIELDS[field])
+                widget.setCurrentText(str(self.cfg.get(field, default)))
             else:
                 widget = QLineEdit(str(self.cfg.get(field, default)))
                 if field in SECRET_FIELDS:
@@ -250,16 +264,33 @@ class SettingsDialog(QDialog):
         save_btn.clicked.connect(self._save)
         layout.addRow(save_btn)
 
+    def _refresh_google_status(self):
+        connected = google_auth.is_connected()
+        self._google_status.setText("Google: Connected" if connected else "Google: Not connected")
+
+    def _connect_google(self):
+        try:
+            google_auth.get_credentials()
+        except Exception as e:
+            QMessageBox.warning(self, "Google connection failed", str(e))
+            return
+        self._refresh_google_status()
+
     def _save(self):
         for field, widget in self._inputs.items():
             if field in BOOL_FIELDS:
                 self.cfg[field] = widget.isChecked()
+            elif field in COMBO_FIELDS:
+                self.cfg[field] = widget.currentText()
             else:
                 self.cfg[field] = widget.text().strip()
 
-        if not config_module.is_config_complete(self.cfg):
-            missing = [f for f in config_module.REQUIRED_FIELDS if not self.cfg.get(f)]
+        missing = config_module.missing_fields(self.cfg)
+        if missing:
             QMessageBox.warning(self, "Incomplete settings", f"Missing: {', '.join(missing)}")
+            return
+        if not google_auth.is_connected():
+            QMessageBox.warning(self, "Incomplete settings", "Connect your Google account first.")
             return
 
         config_module.save_config(self.cfg)
@@ -270,16 +301,17 @@ class PipelineWorker(QThread):
     finished_ok = Signal(object)
     failed = Signal(str)
 
-    def __init__(self, wav_path: Path, screenshots: list, cfg: dict, platform: str):
+    def __init__(self, wav_path: Path, screenshots: list, cfg: dict, platform: str, meeting_title: str | None = None):
         super().__init__()
         self.wav_path = wav_path
         self.screenshots = screenshots
         self.cfg = cfg
         self.platform = platform
+        self.meeting_title = meeting_title
 
     def run(self):
         try:
-            result = run_pipeline(self.wav_path, self.screenshots, self.cfg, self.platform)
+            result = run_pipeline(self.wav_path, self.screenshots, self.cfg, self.platform, self.meeting_title)
             self.finished_ok.emit(result)
         except PipelineError as e:
             self.failed.emit(str(e))
@@ -310,6 +342,7 @@ class Controller:
         self._recording = False
         self._platform = None
         self._session_dir: Path | None = None
+        self._meeting_title: str | None = None
         self._screenshots: list[Path] = []
         self._floating_bar: FloatingBar | None = None
         self._worker: PipelineWorker | None = None
@@ -382,7 +415,18 @@ class Controller:
         self._screenshots = []
         stamp = time.strftime("%Y%m%d-%H%M%S")
         self._session_dir = Path(self.cfg["output_dir"]) / f"session-{stamp}"
+        self._meeting_title = self._lookup_calendar_title()
         self.recorder.start()
+
+    def _lookup_calendar_title(self) -> str | None:
+        # Best-effort: no Google connection yet, API hiccup, or nothing on the
+        # calendar right now must never block starting a recording.
+        if not google_auth.is_connected():
+            return None
+        try:
+            return calendar_lookup.get_current_event_title()
+        except Exception:
+            return None
 
     def _show_floating_bar(self):
         self._floating_bar = FloatingBar()
@@ -422,7 +466,7 @@ class Controller:
                 QSystemTrayIcon.Warning,
             )
 
-        self._worker = PipelineWorker(wav_path, self._screenshots, self.cfg, self._platform)
+        self._worker = PipelineWorker(wav_path, self._screenshots, self.cfg, self._platform, self._meeting_title)
         self._worker.finished_ok.connect(self._on_pipeline_finished)
         self._worker.failed.connect(self._on_pipeline_failed)
         self._worker.start()
