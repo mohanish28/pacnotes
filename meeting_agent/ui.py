@@ -300,6 +300,7 @@ class Controller:
         self.tray = QSystemTrayIcon(app_icon())
         self.tray.setToolTip("Meeting Agent")
         menu = QMenu()
+        menu.addAction("Dashboard", self._open_dashboard)
         menu.addAction("Take notes now", self._on_manual_trigger)
         menu.addAction("Settings", self._open_settings)
         menu.addAction("Quit", self._quit)
@@ -313,6 +314,7 @@ class Controller:
         self._floating_bar: FloatingBar | None = None
         self._worker: PipelineWorker | None = None
         self._active_popup: TakeNotesPopup | None = None
+        self._dashboard = None
 
     def start(self):
         self.detector.start()
@@ -332,6 +334,14 @@ class Controller:
         dialog = SettingsDialog(self.cfg)
         if dialog.exec() == QDialog.Accepted:
             self.cfg = dialog.cfg
+
+    def _open_dashboard(self):
+        if self._dashboard is None:
+            from .dashboard import DashboardWindow  # local import: dashboard.py imports from this module
+            self._dashboard = DashboardWindow(self)
+        self._dashboard.show()
+        self._dashboard.raise_()
+        self._dashboard.activateWindow()
 
     def _on_manual_trigger(self):
         if self._recording:

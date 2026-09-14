@@ -143,7 +143,16 @@ class MeetingDetector(QThread):
                     self._pending_platform = None
                     self.meeting_detected.emit(platform)
 
-            self.msleep(int(POLL_INTERVAL_SEC * 1000))
+            # Sleep in small chunks rather than one 2000ms msleep so stop()
+            # takes effect within ~100ms instead of up to a full poll interval.
+            # Reproduced live: Controller._quit()'s detector.wait(2000) raced
+            # against this exact sleep duration and lost, tearing the app down
+            # while the thread was still alive ("QThread: Destroyed while
+            # thread is still running", Aborted/core dumped).
+            slept = 0
+            while slept < POLL_INTERVAL_SEC * 1000 and self._running:
+                self.msleep(100)
+                slept += 100
 
     def notify_meeting_ended_externally(self):
         """Reset active state when the user manually stops a meeting."""
