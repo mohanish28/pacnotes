@@ -5,7 +5,9 @@ NotImplementedError on import), so it enumerates X11 windows directly via Xlib
 instead — this only sees X11 and XWayland-mapped windows. On a pure-Wayland
 session with no X11 windows (e.g. stock GNOME Wayland with native-Wayland apps),
 title enumeration returns nothing and auto-detection silently never fires; the
-tray's "Take notes now" still works manually.
+tray's "Take notes now" still works manually. macOS uses Quartz's window list
+API directly (pyobjc) -- unverified against a real call, no Mac available to
+test on; written against Apple's documented CGWindowListCopyWindowInfo behavior.
 """
 import sys
 
@@ -20,11 +22,12 @@ def _classify_title(title: str, wm_class: str | None = None) -> str | None:
         return None
     if title == "Zoom Meeting":
         return "Zoom"
-    if title == "Meeting" and wm_class == "zoom":
+    if title == "Meeting" and wm_class and "zoom" in wm_class:
         # Verified on a real Zoom Linux build: the in-call window's actual title
         # is bare "Meeting" (the lobby window is "Zoom Workplace - ..."), not
-        # "Zoom Meeting" as older docs/spec assume. WM_CLASS is required here
-        # since "Meeting" alone is too generic (e.g. a calendar event window).
+        # "Zoom Meeting" as older docs/spec assume. wm_class (Linux WM_CLASS, or
+        # the owning app's name on macOS -- e.g. "zoom.us") is required since
+        # "Meeting" alone is too generic (e.g. a calendar event window).
         return "Zoom"
     if title.startswith("Meet -"):
         # Verified live: an active call's tab title is "Meet - xxx-yyyy-zzz -
@@ -42,6 +45,27 @@ def _all_window_titles_windows() -> list[tuple[str, str | None]]:
     import pygetwindow as gw
 
     return [(w.title, None) for w in gw.getAllWindows()]
+
+
+def _all_window_titles_macos() -> list[tuple[str, str | None]]:
+    # CGWindowListCopyWindowInfo is the standard macOS API for this (what
+    # window-listing utilities generally use) -- no Accessibility permission
+    # needed for the window list itself, but kCGWindowName can come back empty
+    # for other apps' windows until the user grants this app Screen Recording
+    # access under System Settings -> Privacy & Security (macOS 10.15+).
+    # UNVERIFIED: written against Quartz's documented behavior, no Mac to test
+    # detection against a real Zoom/Meet/Teams call.
+    import Quartz
+
+    options = Quartz.kCGWindowListOptionOnScreenOnly | Quartz.kCGWindowListExcludeDesktopElements
+    window_list = Quartz.CGWindowListCopyWindowInfo(options, Quartz.kCGNullWindowID) or []
+    entries = []
+    for window in window_list:
+        title = window.get("kCGWindowName") or ""
+        owner = window.get("kCGWindowOwnerName") or ""
+        if title:
+            entries.append((title, owner.lower() or None))
+    return entries
 
 
 _x11_display = None
@@ -88,7 +112,12 @@ def _all_window_titles_linux() -> list[tuple[str, str | None]]:
 
 
 def _current_meeting_platform() -> str | None:
-    entries = _all_window_titles_windows() if sys.platform == "win32" else _all_window_titles_linux()
+    if sys.platform == "win32":
+        entries = _all_window_titles_windows()
+    elif sys.platform == "darwin":
+        entries = _all_window_titles_macos()
+    else:
+        entries = _all_window_titles_linux()
     for title, wm_class in entries:
         platform = _classify_title(title, wm_class)
         if platform:

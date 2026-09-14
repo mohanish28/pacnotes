@@ -1,13 +1,15 @@
 """On-demand full-screen screenshots, saved next to the meeting's audio/PDF.
 
-Windows uses mss (reads the framebuffer directly via GDI -- works fine there).
-Linux under Wayland cannot: mss reads pixels via X11 APIs, which the Wayland
-compositor never exposes to arbitrary clients (a deliberate security boundary,
-confirmed here by mss silently "succeeding" with a solid-black image). The
-correct Linux path is the XDG Desktop Portal's Screenshot API, which asks the
-compositor itself to grab the frame and hands back a file. Uses jeepney (pure
-Python, no system D-Bus bindings needed) instead of shelling out to `gdbus`,
-whose piped-monitor output proved unreliable for catching the async Response.
+Windows and macOS use mss (reads the framebuffer directly via GDI / Quartz --
+works fine on both; macOS may prompt for Screen Recording permission the
+first time, under System Settings -> Privacy & Security). Linux under Wayland
+cannot: mss reads pixels via X11 APIs, which the Wayland compositor never
+exposes to arbitrary clients (a deliberate security boundary, confirmed here
+by mss silently "succeeding" with a solid-black image). The correct Linux
+path is the XDG Desktop Portal's Screenshot API, which asks the compositor
+itself to grab the frame and hands back a file. Uses jeepney (pure Python, no
+system D-Bus bindings needed) instead of shelling out to `gdbus`, whose
+piped-monitor output proved unreliable for catching the async Response.
 """
 import shutil
 import sys
@@ -15,7 +17,7 @@ import time
 from pathlib import Path
 
 
-def _take_screenshot_windows(output_dir: Path) -> Path:
+def _take_screenshot_mss(output_dir: Path) -> Path:
     import mss
 
     filename = output_dir / f"screenshot_{int(time.time() * 1000)}.png"
@@ -62,6 +64,6 @@ def _take_screenshot_linux(output_dir: Path) -> Path:
 
 def take_screenshot(output_dir: Path) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
-    if sys.platform == "win32":
-        return _take_screenshot_windows(output_dir)
+    if sys.platform in ("win32", "darwin"):
+        return _take_screenshot_mss(output_dir)
     return _take_screenshot_linux(output_dir)
