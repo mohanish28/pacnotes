@@ -23,6 +23,9 @@ def main():
     controller = Controller(cfg)
     controller.start()
 
+    if "--dashboard" in sys.argv or "-d" in sys.argv:
+        controller._open_dashboard()
+
     sys.exit(app.exec())
 
 

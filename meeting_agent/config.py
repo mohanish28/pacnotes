@@ -20,6 +20,10 @@ DEFAULTS = {
     "r2_access_key_id": "",
     "r2_secret_access_key": "",
     "r2_bucket_name": "",
+    "theme": "system",  # "system", "dark", or "light"
+    "wallpaper": "aurora",  # "aurora", "midnight", "sunset", "minimal", or "custom"
+    "custom_wallpaper_path": "",
+    "enable_animations": True,
 }
 
 # Text fields that are always required, regardless of storage_backend.

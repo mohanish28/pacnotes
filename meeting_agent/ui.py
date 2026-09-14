@@ -7,7 +7,7 @@ from PySide6.QtGui import QColor, QIcon, QLinearGradient, QPainter, QPainterPath
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QFormLayout,
     QGraphicsDropShadowEffect, QHBoxLayout, QLabel, QLineEdit, QMenu,
-    QMessageBox, QPushButton, QSystemTrayIcon, QVBoxLayout, QWidget,
+    QMessageBox, QPushButton, QSizeGrip, QSystemTrayIcon, QVBoxLayout, QWidget,
 )
 
 from . import calendar_lookup
@@ -157,8 +157,13 @@ class FloatingBar(QWidget):
         super().__init__()
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setFixedSize(360, 64)
+        self.resize(360, 64)
+        self.setMinimumSize(150, 50)
         _add_drop_shadow(self)
+
+        self._drag_pos = None
+        self._is_minimized = False
+        self._normal_size = self.size()
 
         self._elapsed = 0
         self._timer = QTimer(self)
@@ -179,11 +184,11 @@ class FloatingBar(QWidget):
         text_col.setSpacing(2)
         rec_row = QHBoxLayout()
         rec_row.setSpacing(6)
-        dot = QLabel("●")
-        dot.setStyleSheet("color: #FF5C5C; font-size: 9pt;")
+        self.dot = QLabel("●")
+        self.dot.setStyleSheet("color: #FF5C5C; font-size: 9pt;")
         self.timer_label = QLabel("REC 00:00")
         self.timer_label.setStyleSheet(f"color: {INK_WHITE.name()}; font-weight: 700; font-size: 10.5pt;")
-        rec_row.addWidget(dot)
+        rec_row.addWidget(self.dot)
         rec_row.addWidget(self.timer_label)
         rec_row.addStretch()
         text_col.addLayout(rec_row)
@@ -193,21 +198,65 @@ class FloatingBar(QWidget):
         layout.addLayout(text_col)
         layout.addStretch()
 
-        screenshot_btn = _pill_button("📷", "#5A4E85")
-        screenshot_btn.setFixedWidth(40)
-        stop_btn = _pill_button("⏹ Stop", "#E74C3C")
+        self.screenshot_btn = _pill_button("📷", "#5A4E85")
+        self.screenshot_btn.setFixedWidth(40)
+        self.stop_btn = _pill_button("⏹ Stop", "#E74C3C")
+        self.minimize_btn = _pill_button("—", "#5A4E85")
+        self.minimize_btn.setFixedWidth(32)
 
-        screenshot_btn.clicked.connect(self._on_screenshot_clicked)
-        stop_btn.clicked.connect(self.stop_clicked.emit)
+        self.screenshot_btn.clicked.connect(self._on_screenshot_clicked)
+        self.stop_btn.clicked.connect(self.stop_clicked.emit)
+        self.minimize_btn.clicked.connect(self._toggle_minimize)
 
-        layout.addWidget(screenshot_btn)
-        layout.addWidget(stop_btn)
+        layout.addWidget(self.screenshot_btn)
+        layout.addWidget(self.stop_btn)
+        layout.addWidget(self.minimize_btn)
+
+        # Lets the user resize the window (frameless windows get no native
+        # resize handles); pinned to the corner manually in resizeEvent since
+        # a linear layout has no "corner" slot to place it in.
+        self.size_grip = QSizeGrip(self)
+        self.size_grip.setStyleSheet("background: transparent;")
 
         screen = QApplication.primaryScreen().geometry()
         self.move(screen.right() - self.width() - 20, screen.top() + 20)
 
     def paintEvent(self, event):
         _paint_rounded_panel(self, BG_TOP, BG_BOTTOM)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.size_grip.move(self.width() - self.size_grip.width(), self.height() - self.size_grip.height())
+        self.size_grip.raise_()
+
+    def mousePressEvent(self, event):
+        # Only start a drag if the click landed on bare background, not a
+        # child widget (buttons/labels need their own clicks to still work).
+        if event.button() == Qt.LeftButton and self.childAt(event.position().toPoint()) is None:
+            self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() & Qt.LeftButton and self._drag_pos is not None:
+            self.move(event.globalPosition().toPoint() - self._drag_pos)
+            event.accept()
+
+    def mouseReleaseEvent(self, event):
+        self._drag_pos = None
+
+    def _toggle_minimize(self):
+        self._is_minimized = not self._is_minimized
+        visible = not self._is_minimized
+        for widget in (self.pacman, self.dot, self.timer_label, self.status_label, self.screenshot_btn, self.stop_btn):
+            widget.setVisible(visible)
+        self.minimize_btn.setText("▢" if self._is_minimized else "—")
+        if self._is_minimized:
+            self._normal_size = self.size()
+            self.setMinimumSize(70, 40)  # the normal-mode floor would otherwise clamp this resize
+            self.resize(70, 40)
+        else:
+            self.setMinimumSize(150, 50)
+            self.resize(self._normal_size)
 
     def _on_screenshot_clicked(self):
         self.status_label.setText("📸 Got it!")
@@ -225,76 +274,7 @@ class FloatingBar(QWidget):
         super().closeEvent(event)
 
 
-SECRET_FIELDS = {"gemini_api_key", "r2_secret_access_key"}
-BOOL_FIELDS = {"auto_email", "keep_audio"}
-COMBO_FIELDS = {"storage_backend": ["r2", "drive"]}
-
-
-class SettingsDialog(QDialog):
-    def __init__(self, cfg: dict):
-        super().__init__()
-        self.setWindowTitle("Meeting Agent Settings")
-        self.cfg = dict(cfg)
-        self._inputs = {}
-
-        layout = QFormLayout(self)
-
-        self._google_status = QLabel()
-        connect_btn = QPushButton("Connect Google Account")
-        connect_btn.clicked.connect(self._connect_google)
-        self._refresh_google_status()
-        layout.addRow(self._google_status, connect_btn)
-
-        for field, default in config_module.DEFAULTS.items():
-            if field in BOOL_FIELDS:
-                widget = QCheckBox()
-                widget.setChecked(bool(self.cfg.get(field, default)))
-            elif field in COMBO_FIELDS:
-                widget = QComboBox()
-                widget.addItems(COMBO_FIELDS[field])
-                widget.setCurrentText(str(self.cfg.get(field, default)))
-            else:
-                widget = QLineEdit(str(self.cfg.get(field, default)))
-                if field in SECRET_FIELDS:
-                    widget.setEchoMode(QLineEdit.Password)
-            self._inputs[field] = widget
-            layout.addRow(field.replace("_", " ").title(), widget)
-
-        save_btn = QPushButton("Save")
-        save_btn.clicked.connect(self._save)
-        layout.addRow(save_btn)
-
-    def _refresh_google_status(self):
-        connected = google_auth.is_connected()
-        self._google_status.setText("Google: Connected" if connected else "Google: Not connected")
-
-    def _connect_google(self):
-        try:
-            google_auth.get_credentials()
-        except Exception as e:
-            QMessageBox.warning(self, "Google connection failed", str(e))
-            return
-        self._refresh_google_status()
-
-    def _save(self):
-        for field, widget in self._inputs.items():
-            if field in BOOL_FIELDS:
-                self.cfg[field] = widget.isChecked()
-            elif field in COMBO_FIELDS:
-                self.cfg[field] = widget.currentText()
-            else:
-                self.cfg[field] = widget.text().strip()
-
-        missing = config_module.missing_fields(self.cfg)
-        if missing:
-            QMessageBox.warning(self, "Incomplete settings", f"Missing: {', '.join(missing)}")
-            return
-        if not google_auth.is_connected():
-            QMessageBox.warning(self, "Incomplete settings", "Connect your Google account first.")
-            return
-
-        config_module.save_config(self.cfg)
-        self.accept()
+from .settings_dialog import SettingsDialog
 
 
 class PipelineWorker(QThread):
@@ -337,6 +317,7 @@ class Controller:
         menu.addAction("Settings", self._open_settings)
         menu.addAction("Quit", self._quit)
         self.tray.setContextMenu(menu)
+        self.tray.activated.connect(self._on_tray_activated)
         self.tray.show()
 
         self._recording = False
@@ -367,6 +348,10 @@ class Controller:
         dialog = SettingsDialog(self.cfg)
         if dialog.exec() == QDialog.Accepted:
             self.cfg = dialog.cfg
+
+    def _on_tray_activated(self, reason):
+        if reason in (QSystemTrayIcon.Trigger, QSystemTrayIcon.DoubleClick):
+            self._open_dashboard()
 
     def _open_dashboard(self):
         if self._dashboard is None:
