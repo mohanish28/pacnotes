@@ -23,9 +23,12 @@ from . import meetings
 from .icons import app_icon
 from .settings_dialog import SettingsDialog
 from .theme import theme
+from .svg_icons import (
+    get_svg_pixmap, icon_play, icon_reload, icon_setting,
+)
 from .vector_icons import (
-    icon_check, icon_cloud, icon_gear, icon_link, icon_pdf, icon_play,
-    icon_refresh, icon_search, icon_sparkle, icon_trash, icon_palette,
+    icon_check, icon_cloud, icon_link, icon_pdf,
+    icon_search, icon_sparkle, icon_trash, icon_palette,
 )
 from .widgets import (
     AnimatedButton, AnimatedMeetingCard, AnimatedWallpaperWidget,
@@ -130,7 +133,7 @@ class DashboardWindow(QMainWindow):
         self.theme_switch = SegmentedThemeSwitch()
         header_layout.addWidget(self.theme_switch)
 
-        self.settings_btn = AnimatedButton("", variant="icon", icon=icon_gear(size=18), icon_size=18)
+        self.settings_btn = AnimatedButton("", variant="icon", icon=icon_setting(size=18), icon_size=18)
         self.settings_btn.setToolTip("Settings")
         self.settings_btn.clicked.connect(self._on_settings)
         header_layout.addWidget(self.settings_btn)
@@ -194,10 +197,10 @@ class DashboardWindow(QMainWindow):
         self.search_edit.textChanged.connect(self._on_search_changed)
         subhead_row.addWidget(self.search_edit)
 
-        refresh_btn = AnimatedButton("", variant="icon", icon=icon_refresh(size=16), icon_size=16)
-        refresh_btn.setToolTip("Refresh meetings list")
-        refresh_btn.clicked.connect(self.refresh)
-        subhead_row.addWidget(refresh_btn)
+        self.refresh_btn = AnimatedButton("", variant="icon", icon=icon_reload(size=16), icon_size=16)
+        self.refresh_btn.setToolTip("Refresh meetings list")
+        self.refresh_btn.clicked.connect(self.refresh)
+        subhead_row.addWidget(self.refresh_btn)
 
         content_layout.addLayout(subhead_row)
 
@@ -299,7 +302,9 @@ class DashboardWindow(QMainWindow):
             if val_lbl:
                 val_lbl.setStyleSheet(f"font-size: 11pt; font-weight: 700; color: {tm.token('text_primary')};")
 
-        self.settings_btn.set_custom_icon(icon_gear(color=tm.token('text_primary'), size=18))
+        self.settings_btn.set_custom_icon(icon_setting(color=tm.token('text_primary'), size=18))
+        if hasattr(self, 'refresh_btn'):
+            self.refresh_btn.set_custom_icon(icon_reload(color=tm.token('text_secondary'), size=16))
         self.wallpaper_btn.set_custom_icon(icon_palette(color=tm.token('text_primary'), size=16))
 
         self.count_badge.setStyleSheet(f"""

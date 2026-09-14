@@ -13,8 +13,12 @@ from PySide6.QtWidgets import (
 from . import config as config_module
 from . import google_auth
 from .theme import WALLPAPER_PRESETS, theme
+from .svg_icons import (
+    get_svg_pixmap, icon_gmail, icon_google, icon_google_calendar,
+    icon_google_drive, icon_reload, icon_setting,
+)
 from .vector_icons import (
-    icon_check, icon_cloud, icon_eye, icon_eye_off, icon_folder, icon_gear,
+    icon_check, icon_cloud, icon_eye, icon_eye_off, icon_folder,
     icon_monitor, icon_moon, icon_palette, icon_sparkle, icon_sun,
 )
 from .widgets import (
@@ -110,7 +114,7 @@ class SettingsDialog(QDialog):
 
         icon_box = QLabel()
         icon_box.setFixedSize(42, 42)
-        icon_box.setPixmap(icon_gear(color="#6366F1", size=28).pixmap(28, 28))
+        icon_box.setPixmap(get_svg_pixmap("setting", color="#6366F1", size=26))
         icon_box.setAlignment(Qt.AlignCenter)
         icon_box.setStyleSheet(f"""
             QLabel {{
@@ -150,7 +154,7 @@ class SettingsDialog(QDialog):
         tabs = [
             ("AI & Models", icon_sparkle),
             ("Storage & Cloud", icon_cloud),
-            ("Google & Email", icon_gear),
+            ("Google & Email", lambda color=None, size=17: icon_google(size=size)),
             ("Appearance & Wallpaper", icon_palette),
         ]
 
@@ -277,6 +281,8 @@ class SettingsDialog(QDialog):
         self.drive_card = QPushButton("Google Drive\n(Shared OAuth Storage)")
         self.drive_card.setFixedHeight(60)
         self.drive_card.setCursor(Qt.PointingHandCursor)
+        self.drive_card.setIcon(icon_google_drive(size=22))
+        self.drive_card.setIconSize(QSize(22, 22))
         self.drive_card.clicked.connect(lambda: self._select_storage_backend("drive"))
 
         backend_row.addWidget(self.r2_card)
@@ -410,6 +416,11 @@ class SettingsDialog(QDialog):
         """)
         g_layout = QHBoxLayout(google_card)
         g_layout.setContentsMargins(16, 14, 16, 14)
+        g_layout.setSpacing(14)
+
+        g_logo = QLabel()
+        g_logo.setPixmap(get_svg_pixmap("google", size=32))
+        g_layout.addWidget(g_logo)
 
         g_info_col = QVBoxLayout()
         self.google_status_lbl = QLabel()
@@ -420,13 +431,21 @@ class SettingsDialog(QDialog):
         g_info_col.addWidget(g_sub)
         g_layout.addLayout(g_info_col, 1)
 
-        self.connect_google_btn = AnimatedButton("Connect Account", variant="primary")
+        self.connect_google_btn = AnimatedButton("Connect Account", variant="primary", icon=icon_google(size=16), icon_size=16)
         self.connect_google_btn.clicked.connect(self._connect_google)
         g_layout.addWidget(self.connect_google_btn)
         layout.addWidget(google_card)
 
         # Recipient Email
-        layout.addWidget(self._section_title("Email Notification"))
+        email_sec = QHBoxLayout()
+        email_sec.setSpacing(8)
+        gmail_icon = QLabel()
+        gmail_icon.setPixmap(get_svg_pixmap("gmail", size=20))
+        email_sec.addWidget(gmail_icon)
+        email_sec.addWidget(self._section_title("Email Delivery (Gmail)"))
+        email_sec.addStretch()
+        layout.addLayout(email_sec)
+
         layout.addWidget(self._field_label("Recipient Email Address"))
         self.recipient_email_edit = QLineEdit()
         self.recipient_email_edit.setPlaceholderText("your-email@example.com")
@@ -470,11 +489,13 @@ class SettingsDialog(QDialog):
             self.google_status_lbl.setText("🟢 Google Account: Connected")
             self.google_status_lbl.setStyleSheet("color: #10B981; font-weight: 700; font-size: 11pt;")
             self.connect_google_btn.setText("Reconnect")
+            self.connect_google_btn.set_custom_icon(icon_reload(color="#FFFFFF", size=15))
             self.connect_google_btn._variant = "secondary"
         else:
             self.google_status_lbl.setText("🟡 Google Account: Not Connected")
             self.google_status_lbl.setStyleSheet("color: #F59E0B; font-weight: 700; font-size: 11pt;")
             self.connect_google_btn.setText("Connect Account")
+            self.connect_google_btn.set_custom_icon(icon_google(size=16))
             self.connect_google_btn._variant = "primary"
         self.connect_google_btn.update()
 

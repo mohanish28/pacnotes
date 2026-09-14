@@ -2,7 +2,7 @@
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QRectF, Qt, QTimer, Signal, QThread
+from PySide6.QtCore import QRectF, QSize, Qt, QTimer, Signal, QThread
 from PySide6.QtGui import QColor, QIcon, QLinearGradient, QPainter, QPainterPath
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QFormLayout,
@@ -91,13 +91,22 @@ class PacmanWidget(QWidget):
         painter.drawPie(rect, start_angle, span_angle)
 
 
-def _pill_button(text: str, bg: str, fg: str = "#FFFFFF") -> QPushButton:
+from .svg_icons import (
+    get_svg_pixmap, icon_camera, icon_dots_vertical, icon_google_meet,
+    icon_pause, icon_play, icon_resize_handle, icon_stop_circle, icon_zoom,
+)
+
+
+def _pill_button(text: str, bg: str, fg: str = "#FFFFFF", icon: QIcon | None = None, icon_size: int = 16) -> QPushButton:
     btn = QPushButton(text)
+    if icon is not None and not icon.isNull():
+        btn.setIcon(icon)
+        btn.setIconSize(QSize(icon_size, icon_size))
     btn.setCursor(Qt.PointingHandCursor)
     btn.setStyleSheet(f"""
         QPushButton {{
             background-color: {bg}; color: {fg}; border: none;
-            border-radius: 10px; padding: 7px 16px; font-weight: 600;
+            border-radius: 10px; padding: 7px 14px; font-weight: 600;
         }}
         QPushButton:hover {{ background-color: {bg}dd; }}
         QPushButton:pressed {{ background-color: {bg}aa; }}
@@ -105,42 +114,176 @@ def _pill_button(text: str, bg: str, fg: str = "#FFFFFF") -> QPushButton:
     return btn
 
 
+class DragHandle(QLabel):
+    """Interactive 6-dot drag handle that relocates its parent/target window when dragged."""
+
+    def __init__(self, target_window: QWidget, color: str = "#C9BFEE", size: int = 18, parent=None):
+        super().__init__(parent)
+        self._target = target_window
+        self._drag_pos = None
+        self.setPixmap(get_svg_pixmap("dots_vertical", color=color, size=size))
+        self.setAlignment(Qt.AlignCenter)
+        self.setFixedSize(size + 10, size + 16)
+        self.setCursor(Qt.SizeAllCursor)
+        self.setToolTip("Click and drag to relocate window")
+        self.setStyleSheet("""
+            QLabel {
+                border-radius: 6px;
+                padding: 2px;
+            }
+            QLabel:hover {
+                background-color: rgba(255, 255, 255, 0.18);
+            }
+        """)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._drag_pos = event.globalPosition().toPoint() - self._target.frameGeometry().topLeft()
+            wh = self._target.window().windowHandle()
+            if wh is not None:
+                try:
+                    wh.startSystemMove()
+                except Exception:
+                    pass
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if (event.buttons() & Qt.LeftButton) and self._drag_pos is not None:
+            self._target.move(event.globalPosition().toPoint() - self._drag_pos)
+            event.accept()
+        else:
+            super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        self._drag_pos = None
+        super().mouseReleaseEvent(event)
+
+
+class SvgResizeGrip(QSizeGrip):
+    """Bottom-right resize grip widget rendering resize-handle-svgrepo-com.svg."""
+
+    def __init__(self, parent=None, size: int = 16, color: str = "#C9BFEE"):
+        super().__init__(parent)
+        self._size = size
+        self._color = color
+        self.setFixedSize(size + 6, size + 6)
+        self.setCursor(Qt.SizeFDiagCursor)
+        self.setToolTip("Drag to resize")
+        self.setStyleSheet("background: transparent;")
+        self._pix = get_svg_pixmap("resize_handle", color=color, size=size)
+        self._pix_hover = get_svg_pixmap("resize_handle", color="#FFFFFF", size=size)
+
+    def enterEvent(self, event):
+        super().enterEvent(event)
+        self.update()
+
+    def leaveEvent(self, event):
+        super().leaveEvent(event)
+        self.update()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setRenderHint(QPainter.SmoothPixmapTransform)
+        pix = self._pix_hover if self.underMouse() else self._pix
+        p.drawPixmap(self.width() - self._size - 3, self.height() - self._size - 3, pix)
+
+
 class TakeNotesPopup(QDialog):
     def __init__(self, platform: str):
         super().__init__()
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setFixedSize(320, 150)
+        self.winId()  # Guarantee underlying native QWindow is created immediately
+        self.resize(380, 170)
+        self.setMinimumSize(320, 140)
         _add_drop_shadow(self)
 
+        self._drag_pos = None
+
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(22, 20, 22, 18)
-        layout.setSpacing(14)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(12)
 
         header = QHBoxLayout()
-        header.addWidget(PacmanWidget(34))
-        title = QLabel(f"{platform} meeting detected")
-        title.setStyleSheet(f"color: {INK_WHITE.name()}; font-size: 14pt; font-weight: 700;")
+        header.setSpacing(10)
+
+        # 6-dot drag handle for repositioning
+        self.drag_handle = DragHandle(self, color="#C9BFEE", size=18)
+        header.addWidget(self.drag_handle)
+
+        # Platform specific icon
+        plat_lower = platform.lower()
+        if "meet" in plat_lower:
+            plat_icon = QLabel()
+            plat_icon.setPixmap(get_svg_pixmap("google_meet", size=32))
+            header.addWidget(plat_icon)
+        elif "zoom" in plat_lower:
+            plat_icon = QLabel()
+            plat_icon.setPixmap(get_svg_pixmap("zoom", size=32))
+            header.addWidget(plat_icon)
+        else:
+            header.addWidget(PacmanWidget(32))
+
+        title = QLabel(f"{platform} Meeting Detected")
+        title.setStyleSheet(f"color: {INK_WHITE.name()}; font-size: 13pt; font-weight: 700;")
         header.addWidget(title)
         header.addStretch()
         layout.addLayout(header)
 
-        subtitle = QLabel("Want me to take notes for this one?")
-        subtitle.setStyleSheet(f"color: {INK_WHITE.name()}; font-size: 10.5pt;")
+        subtitle = QLabel("Want me to take structured notes for this meeting?")
+        subtitle.setStyleSheet(f"color: {INK_WHITE.name()}; font-size: 10pt;")
         layout.addWidget(subtitle)
         layout.addStretch()
 
         buttons = QHBoxLayout()
         buttons.addStretch()
         no_btn = _pill_button("Not now", "#5A4E85")
-        yes_btn = _pill_button("Yes, record", "#2ECC71")
+        yes_btn = _pill_button("Yes, record", "#2ECC71", icon=icon_play(color="#FFFFFF", size=15))
         no_btn.clicked.connect(self.reject)
         yes_btn.clicked.connect(self.accept)
         buttons.addWidget(no_btn)
         buttons.addWidget(yes_btn)
         layout.addLayout(buttons)
 
+        # Dedicated SVG resize grip handle in bottom right
+        self.size_grip = SvgResizeGrip(self, size=16, color="#C9BFEE")
+
         self._center_on_screen()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "size_grip"):
+            self.size_grip.move(self.width() - self.size_grip.width(), self.height() - self.size_grip.height())
+            self.size_grip.raise_()
+
+    def mousePressEvent(self, event):
+        child = self.childAt(event.position().toPoint())
+        # Drag if clicking anywhere on header, labels, or background (excluding buttons and size grip)
+        if event.button() == Qt.LeftButton and not isinstance(child, (QPushButton, QSizeGrip)):
+            self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            wh = self.window().windowHandle()
+            if wh is not None:
+                try:
+                    wh.startSystemMove()
+                except Exception:
+                    pass
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if (event.buttons() & Qt.LeftButton) and self._drag_pos is not None:
+            self.move(event.globalPosition().toPoint() - self._drag_pos)
+            event.accept()
+        else:
+            super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        self._drag_pos = None
+        super().mouseReleaseEvent(event)
 
     def paintEvent(self, event):
         _paint_rounded_panel(self, BG_TOP, BG_BOTTOM)
@@ -154,6 +297,7 @@ class FloatingBar(QWidget):
     screenshot_clicked = Signal()
     stop_clicked = Signal()
     pause_clicked = Signal()
+    minimize_clicked = Signal()
 
     STATUS_DEFAULT = "Listening for what matters..."
 
@@ -161,13 +305,12 @@ class FloatingBar(QWidget):
         super().__init__()
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.resize(360, 64)
-        self.setMinimumSize(150, 50)
+        self.winId()  # Guarantee native QWindow exists immediately
+        self.resize(440, 64)
+        self.setMinimumSize(160, 50)
         _add_drop_shadow(self)
 
         self._drag_pos = None
-        self._is_minimized = False
-        self._normal_size = self.size()
 
         self._elapsed = 0
         self._timer = QTimer(self)
@@ -178,8 +321,12 @@ class FloatingBar(QWidget):
         self._status_reset_timer.timeout.connect(lambda: self.status_label.setText(self.STATUS_DEFAULT))
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(14, 10, 14, 10)
-        layout.setSpacing(10)
+        layout.setContentsMargins(12, 10, 14, 10)
+        layout.setSpacing(9)
+
+        # 6-dot drag handle for moving the floating bar
+        self.drag_handle = DragHandle(self, color="#C9BFEE", size=18)
+        layout.addWidget(self.drag_handle)
 
         self.pacman = PacmanWidget(36)
         layout.addWidget(self.pacman)
@@ -202,28 +349,32 @@ class FloatingBar(QWidget):
         layout.addLayout(text_col)
         layout.addStretch()
 
-        self.screenshot_btn = _pill_button("📷", "#5A4E85")
+        # Action Buttons with custom SVGs
+        self.screenshot_btn = _pill_button("", "#5A4E85", icon=icon_camera(color="#FFFFFF", size=18))
+        self.screenshot_btn.setToolTip("Take Screenshot (camera)")
         self.screenshot_btn.setFixedWidth(40)
-        self.pause_btn = _pill_button("⏸ Pause", "#E0A030")
-        self.stop_btn = _pill_button("⏹ Stop", "#E74C3C")
+
+        self.pause_btn = _pill_button("Pause", "#D97706", icon=icon_pause(color="#FFFFFF", size=15))
+        self.pause_btn.setToolTip("Pause / Resume recording")
+
+        self.stop_btn = _pill_button("Stop", "#DC2626", icon=icon_stop_circle(color="#FFFFFF", size=18))
+        self.stop_btn.setToolTip("Stop recording and generate notes")
+
         self.minimize_btn = _pill_button("—", "#5A4E85")
         self.minimize_btn.setFixedWidth(32)
 
         self.screenshot_btn.clicked.connect(self._on_screenshot_clicked)
         self.pause_btn.clicked.connect(self.pause_clicked.emit)
         self.stop_btn.clicked.connect(self.stop_clicked.emit)
-        self.minimize_btn.clicked.connect(self._toggle_minimize)
+        self.minimize_btn.clicked.connect(self.minimize_clicked.emit)
 
         layout.addWidget(self.screenshot_btn)
         layout.addWidget(self.pause_btn)
         layout.addWidget(self.stop_btn)
         layout.addWidget(self.minimize_btn)
 
-        # Lets the user resize the window (frameless windows get no native
-        # resize handles); pinned to the corner manually in resizeEvent since
-        # a linear layout has no "corner" slot to place it in.
-        self.size_grip = QSizeGrip(self)
-        self.size_grip.setStyleSheet("background: transparent;")
+        # Dedicated SVG resize grip handle in bottom right
+        self.size_grip = SvgResizeGrip(self, size=16, color="#C9BFEE")
 
         screen = QApplication.primaryScreen().geometry()
         self.move(screen.right() - self.width() - 20, screen.top() + 20)
@@ -237,33 +388,30 @@ class FloatingBar(QWidget):
         self.size_grip.raise_()
 
     def mousePressEvent(self, event):
-        # Only start a drag if the click landed on bare background, not a
-        # child widget (buttons/labels need their own clicks to still work).
-        if event.button() == Qt.LeftButton and self.childAt(event.position().toPoint()) is None:
+        child = self.childAt(event.position().toPoint())
+        # Drag from anywhere except action buttons or resize grip
+        if event.button() == Qt.LeftButton and not isinstance(child, (QPushButton, QSizeGrip)):
             self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            wh = self.window().windowHandle()
+            if wh is not None:
+                try:
+                    wh.startSystemMove()
+                except Exception:
+                    pass
             event.accept()
+        else:
+            super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
-        if event.buttons() & Qt.LeftButton and self._drag_pos is not None:
+        if (event.buttons() & Qt.LeftButton) and self._drag_pos is not None:
             self.move(event.globalPosition().toPoint() - self._drag_pos)
             event.accept()
+        else:
+            super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
         self._drag_pos = None
-
-    def _toggle_minimize(self):
-        self._is_minimized = not self._is_minimized
-        visible = not self._is_minimized
-        for widget in (self.pacman, self.dot, self.timer_label, self.status_label, self.screenshot_btn, self.pause_btn, self.stop_btn):
-            widget.setVisible(visible)
-        self.minimize_btn.setText("▢" if self._is_minimized else "—")
-        if self._is_minimized:
-            self._normal_size = self.size()
-            self.setMinimumSize(70, 40)  # the normal-mode floor would otherwise clamp this resize
-            self.resize(70, 40)
-        else:
-            self.setMinimumSize(150, 50)
-            self.resize(self._normal_size)
+        super().mouseReleaseEvent(event)
 
     def _on_screenshot_clicked(self):
         self.status_label.setText("📸 Got it!")
@@ -274,13 +422,15 @@ class FloatingBar(QWidget):
         if is_paused:
             self._timer.stop()
             self.pacman.stop()
-            self.pause_btn.setText("▶ Resume")
+            self.pause_btn.setText("Resume")
+            self.pause_btn.setIcon(icon_play(color="#FFFFFF", size=15))
             self.dot.setStyleSheet("color: #E0A030; font-size: 9pt;")
             self.status_label.setText("Paused")
         else:
             self._timer.start(1000)
             self.pacman.resume()
-            self.pause_btn.setText("⏸ Pause")
+            self.pause_btn.setText("Pause")
+            self.pause_btn.setIcon(icon_pause(color="#FFFFFF", size=15))
             self.dot.setStyleSheet("color: #FF5C5C; font-size: 9pt;")
             self.status_label.setText(self.STATUS_DEFAULT)
 
@@ -372,7 +522,15 @@ class Controller:
             self.cfg = dialog.cfg
 
     def _on_tray_activated(self, reason):
-        if reason in (QSystemTrayIcon.Trigger, QSystemTrayIcon.DoubleClick):
+        if reason not in (QSystemTrayIcon.Trigger, QSystemTrayIcon.DoubleClick):
+            return
+        if self._floating_bar is not None and self._floating_bar.isHidden():
+            # Recording bar was minimized -- restoring it is more useful right
+            # now than the dashboard, since a recording is actively running.
+            self._floating_bar.show()
+            self._floating_bar.raise_()
+            self._floating_bar.activateWindow()
+        else:
             self._open_dashboard()
 
     def _open_dashboard(self):
@@ -441,7 +599,22 @@ class Controller:
         self._floating_bar.screenshot_clicked.connect(self._on_screenshot)
         self._floating_bar.stop_clicked.connect(self._stop_and_process)
         self._floating_bar.pause_clicked.connect(self._on_pause_toggle)
+        self._floating_bar.minimize_clicked.connect(self._on_minimize)
         self._floating_bar.show()
+
+    def _on_minimize(self):
+        # Qt.Tool windows never get a taskbar entry (true on every window
+        # manager, by design -- and GNOME, which this was built/tested on,
+        # has no taskbar at all by default). The tray icon is the one
+        # restore point that actually exists everywhere, so minimize just
+        # hides the bar; _on_tray_activated brings it back.
+        if self._floating_bar:
+            self._floating_bar.hide()
+            self.tray.showMessage(
+                "Recording Continues",
+                "Click the tray icon to bring back the recording controls.",
+                QSystemTrayIcon.Information,
+            )
 
     def _on_pause_toggle(self):
         self._paused = not self._paused

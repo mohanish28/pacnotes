@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 from .theme import WALLPAPER_PRESETS, theme
+from .svg_icons import get_svg_pixmap, get_svg_icon
 from .vector_icons import (
     icon_check, icon_cloud, icon_folder, icon_gear, icon_link, icon_monitor,
     icon_moon, icon_pdf, icon_play, icon_refresh, icon_search, icon_sparkle,
@@ -743,10 +744,17 @@ class AnimatedMeetingCard(QWidget):
         self.title_lbl.setStyleSheet("font-weight: 700; font-size: 11pt;")
         meta_col.addWidget(self.title_lbl)
 
+        time_row = QHBoxLayout()
+        time_row.setSpacing(6)
+        cal_icon = QLabel()
+        cal_icon.setPixmap(get_svg_pixmap("google_calendar", size=14))
         created_at_fmt = self._format_timestamp(record.get("created_at", ""))
-        self.time_lbl = QLabel(f"📅 {created_at_fmt}")
+        self.time_lbl = QLabel(created_at_fmt)
         self.time_lbl.setStyleSheet(f"font-size: 9pt; color: {theme().token('text_secondary')};")
-        meta_col.addWidget(self.time_lbl)
+        time_row.addWidget(cal_icon)
+        time_row.addWidget(self.time_lbl)
+        time_row.addStretch()
+        meta_col.addLayout(time_row)
 
         layout.addLayout(meta_col)
         layout.addStretch()
@@ -772,25 +780,36 @@ class AnimatedMeetingCard(QWidget):
 
     def _create_platform_badge(self, platform: str) -> QLabel:
         lbl = QLabel()
-        lbl.setFixedSize(40, 40)
+        lbl.setFixedSize(42, 42)
         lbl.setAlignment(Qt.AlignCenter)
-        color_map = {
-            "Google Meet": ("#059669", "G"),
-            "Zoom": ("#2563EB", "Z"),
-            "Teams": ("#4F46E5", "T"),
-            "Manual": ("#7C3AED", "M"),
-        }
-        bg, letter = color_map.get(platform, ("#6366F1", platform[:1]))
-        lbl.setStyleSheet(f"""
-            QLabel {{
-                background-color: {bg};
-                color: #FFFFFF;
-                font-weight: 800;
-                font-size: 13pt;
-                border-radius: 10px;
-            }}
-        """)
-        lbl.setText(letter)
+
+        plat_lower = platform.lower()
+        if "meet" in plat_lower:
+            lbl.setPixmap(get_svg_pixmap("google_meet", size=30))
+            lbl.setStyleSheet("""
+                QLabel {
+                    background-color: rgba(255, 255, 255, 0.90);
+                    border-radius: 11px;
+                    border: 1px solid rgba(0, 0, 0, 0.08);
+                }
+            """)
+        elif "zoom" in plat_lower:
+            lbl.setPixmap(get_svg_pixmap("zoom", size=30))
+            lbl.setStyleSheet("""
+                QLabel {
+                    background-color: #2D8CFF;
+                    border-radius: 11px;
+                }
+            """)
+        else:
+            # Manual or generic recording
+            lbl.setPixmap(get_svg_pixmap("play", color="#FFFFFF", size=20))
+            lbl.setStyleSheet("""
+                QLabel {
+                    background-color: #6366F1;
+                    border-radius: 11px;
+                }
+            """)
         return lbl
 
     def _format_timestamp(self, iso: str) -> str:
