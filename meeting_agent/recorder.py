@@ -52,6 +52,7 @@ class Recorder:
 
     def __init__(self):
         self._stop_event = threading.Event()
+        self._paused_event = threading.Event()
         self._loopback_chunks: list[np.ndarray] = []
         self._mic_chunks: list[np.ndarray] = []
         self._threads: list[threading.Thread] = []
@@ -59,6 +60,7 @@ class Recorder:
 
     def start(self):
         self._stop_event.clear()
+        self._paused_event.clear()
         self._loopback_chunks = []
         self._mic_chunks = []
         self.loopback_error = None
@@ -69,13 +71,26 @@ class Recorder:
         for t in self._threads:
             t.start()
 
+    def pause(self):
+        self._paused_event.set()
+
+    def resume(self):
+        self._paused_event.clear()
+
     def _record_loopback(self):
         try:
             speaker = sc.default_speaker()
             loopback_mic = sc.get_microphone(id=str(speaker.name), include_loopback=True)
             with loopback_mic.recorder(samplerate=CAPTURE_RATE, channels=1) as rec:
                 while not self._stop_event.is_set():
-                    self._loopback_chunks.append(rec.record(numframes=CHUNK_FRAMES))
+                    # Still call record() while paused (draining the device at
+                    # the same cadence) rather than stopping the stream -- that
+                    # keeps the connection alive so resume is instant instead of
+                    # paying the ~1.5-2s reconnect latency measured earlier.
+                    # Paused audio is simply not kept.
+                    chunk = rec.record(numframes=CHUNK_FRAMES)
+                    if not self._paused_event.is_set():
+                        self._loopback_chunks.append(chunk)
         except Exception as e:
             # Loopback is mandatory per spec (mic-only misses everyone else on the
             # call) -- record why it failed instead of silently degrading, so the
@@ -88,7 +103,9 @@ class Recorder:
             mic = sc.default_microphone()
             with mic.recorder(samplerate=CAPTURE_RATE, channels=1) as rec:
                 while not self._stop_event.is_set():
-                    self._mic_chunks.append(rec.record(numframes=CHUNK_FRAMES))
+                    chunk = rec.record(numframes=CHUNK_FRAMES)
+                    if not self._paused_event.is_set():
+                        self._mic_chunks.append(chunk)
         except Exception:
             pass  # no mic available -> loopback-only recording
 

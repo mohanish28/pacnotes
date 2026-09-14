@@ -77,6 +77,9 @@ class PacmanWidget(QWidget):
     def stop(self):
         self._timer.stop()
 
+    def resume(self):
+        self._timer.start(110)
+
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
@@ -150,6 +153,7 @@ class TakeNotesPopup(QDialog):
 class FloatingBar(QWidget):
     screenshot_clicked = Signal()
     stop_clicked = Signal()
+    pause_clicked = Signal()
 
     STATUS_DEFAULT = "Listening for what matters..."
 
@@ -200,15 +204,18 @@ class FloatingBar(QWidget):
 
         self.screenshot_btn = _pill_button("📷", "#5A4E85")
         self.screenshot_btn.setFixedWidth(40)
+        self.pause_btn = _pill_button("⏸ Pause", "#E0A030")
         self.stop_btn = _pill_button("⏹ Stop", "#E74C3C")
         self.minimize_btn = _pill_button("—", "#5A4E85")
         self.minimize_btn.setFixedWidth(32)
 
         self.screenshot_btn.clicked.connect(self._on_screenshot_clicked)
+        self.pause_btn.clicked.connect(self.pause_clicked.emit)
         self.stop_btn.clicked.connect(self.stop_clicked.emit)
         self.minimize_btn.clicked.connect(self._toggle_minimize)
 
         layout.addWidget(self.screenshot_btn)
+        layout.addWidget(self.pause_btn)
         layout.addWidget(self.stop_btn)
         layout.addWidget(self.minimize_btn)
 
@@ -247,7 +254,7 @@ class FloatingBar(QWidget):
     def _toggle_minimize(self):
         self._is_minimized = not self._is_minimized
         visible = not self._is_minimized
-        for widget in (self.pacman, self.dot, self.timer_label, self.status_label, self.screenshot_btn, self.stop_btn):
+        for widget in (self.pacman, self.dot, self.timer_label, self.status_label, self.screenshot_btn, self.pause_btn, self.stop_btn):
             widget.setVisible(visible)
         self.minimize_btn.setText("▢" if self._is_minimized else "—")
         if self._is_minimized:
@@ -262,6 +269,20 @@ class FloatingBar(QWidget):
         self.status_label.setText("📸 Got it!")
         self._status_reset_timer.start(2000)
         self.screenshot_clicked.emit()
+
+    def set_paused_visual(self, is_paused: bool):
+        if is_paused:
+            self._timer.stop()
+            self.pacman.stop()
+            self.pause_btn.setText("▶ Resume")
+            self.dot.setStyleSheet("color: #E0A030; font-size: 9pt;")
+            self.status_label.setText("Paused")
+        else:
+            self._timer.start(1000)
+            self.pacman.resume()
+            self.pause_btn.setText("⏸ Pause")
+            self.dot.setStyleSheet("color: #FF5C5C; font-size: 9pt;")
+            self.status_label.setText(self.STATUS_DEFAULT)
 
     def _tick(self):
         self._elapsed += 1
@@ -324,6 +345,7 @@ class Controller:
         self._platform = None
         self._session_dir: Path | None = None
         self._meeting_title: str | None = None
+        self._paused = False
         self._screenshots: list[Path] = []
         self._floating_bar: FloatingBar | None = None
         self._worker: PipelineWorker | None = None
@@ -396,6 +418,7 @@ class Controller:
 
     def _begin_capture(self, platform: str):
         self._recording = True
+        self._paused = False
         self._platform = platform
         self._screenshots = []
         stamp = time.strftime("%Y%m%d-%H%M%S")
@@ -417,7 +440,17 @@ class Controller:
         self._floating_bar = FloatingBar()
         self._floating_bar.screenshot_clicked.connect(self._on_screenshot)
         self._floating_bar.stop_clicked.connect(self._stop_and_process)
+        self._floating_bar.pause_clicked.connect(self._on_pause_toggle)
         self._floating_bar.show()
+
+    def _on_pause_toggle(self):
+        self._paused = not self._paused
+        if self._paused:
+            self.recorder.pause()
+        else:
+            self.recorder.resume()
+        if self._floating_bar:
+            self._floating_bar.set_paused_visual(self._paused)
 
     def _on_screenshot(self):
         if not self._session_dir:
