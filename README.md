@@ -83,13 +83,43 @@ OAuth token live in that same folder.
    the project folder.
 4. Check "Run whether user is logged on or not" if desired.
 
-## Building a single .exe (PyInstaller)
+## Building a single-file executable (PyInstaller)
 ```
 pip install pyinstaller
-pyinstaller --noconsole --onefile --name MeetingAgent --add-data "meeting-notes-prompt.md;." -m meeting_agent
+
+# Linux (verified working end to end -- builds, launches, tray icon shows,
+# no missing-module crashes):
+pyinstaller --noconfirm --onefile --name meeting-agent \
+  --add-data "meeting-notes-prompt.md:." \
+  --add-data "svg:svg" \
+  --collect-all faster_whisper \
+  --collect-all ctranslate2 \
+  --collect-all google.genai \
+  --collect-all googleapiclient \
+  --collect-all google_auth_oauthlib \
+  --collect-all reportlab \
+  --collect-all xhtml2pdf \
+  run_meeting_agent.py
+
+# Windows: same command, use ";" instead of ":" in --add-data (Windows'
+# PyInstaller data-separator), add --noconsole, and --name MeetingAgent.
 ```
-The `--add-data` flag ships `meeting-notes-prompt.md` alongside the exe — the app
-looks for it next to the package, so keep it in the same folder as the built exe.
+Notes on why each piece is there, found by actually running the built binary
+rather than trusting a clean build log:
+- `run_meeting_agent.py`, not `-m meeting_agent` or `meeting_agent/__main__.py`:
+  PyInstaller needs a real script path (`-m` collides with its own `--manifest`
+  flag), and `__main__.py`'s relative import (`from .main import main`) breaks
+  once PyInstaller's bootloader runs it as a bare top-level script instead of a
+  package submodule.
+- `--collect-all reportlab` and `--collect-all xhtml2pdf`: reportlab's barcode
+  module dynamically imports its submodules in a way PyInstaller's static
+  analysis can't see, so a plain build crashes with `ModuleNotFoundError:
+  No module named 'reportlab.graphics.barcode.code128'` the first time a PDF
+  is rendered (i.e., after a full recording, not on launch -- easy to miss).
+- `--add-data "svg:svg"`: `svg_icons.py` and `enhancer.py` (for
+  `meeting-notes-prompt.md`) both resolve resource paths from `sys._MEIPASS`
+  when frozen, falling back to `__file__`-relative paths in normal dev runs --
+  so the bundled files need to land at the exact path those checks expect.
 
 ## Running on Linux
 

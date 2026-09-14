@@ -2,6 +2,7 @@
 
 Loads vector SVGs from the 'svg' directory with caching and real-time color tinting.
 """
+import sys
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt
@@ -11,7 +12,13 @@ _PIXMAP_CACHE: dict[tuple[str, str, int], QPixmap] = {}
 
 
 def _get_svg_dir() -> Path:
-    candidates = [
+    candidates = []
+    # PyInstaller onefile extracts --add-data under sys._MEIPASS, not next to
+    # __file__ -- check that first so a frozen build finds the bundled SVGs.
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.append(Path(meipass) / "svg")
+    candidates += [
         Path(__file__).resolve().parent.parent / "svg",
         Path(__file__).resolve().parent / "svg",
         Path(__file__).resolve().parent / "assets" / "svg",

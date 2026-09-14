@@ -1,11 +1,15 @@
 """Sends the transcript to Gemini, using meeting-notes-prompt.md as the system prompt."""
+import sys
 from pathlib import Path
 
 from google import genai
 from google.genai import types
 
-# meeting-notes-prompt.md lives at the project root, one level above this package.
-PROMPT_PATH = Path(__file__).resolve().parent.parent / "meeting-notes-prompt.md"
+# meeting-notes-prompt.md lives at the project root, one level above this package,
+# in dev. A PyInstaller onefile build extracts bundled data (--add-data) under
+# sys._MEIPASS instead -- __file__-relative lookup alone breaks there.
+_BASE_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
+PROMPT_PATH = _BASE_DIR / "meeting-notes-prompt.md"
 
 
 def enhance_notes(transcript: str, api_key: str, model: str) -> str:
