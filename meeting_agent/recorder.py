@@ -1,5 +1,6 @@
 """Captures speaker loopback + microphone, mixes to 16 kHz mono, writes a WAV."""
 import threading
+import time
 import wave
 from pathlib import Path
 
@@ -81,16 +82,21 @@ class Recorder:
         try:
             speaker = sc.default_speaker()
             loopback_mic = sc.get_microphone(id=str(speaker.name), include_loopback=True)
-            with loopback_mic.recorder(samplerate=CAPTURE_RATE, channels=1) as rec:
-                while not self._stop_event.is_set():
-                    # Still call record() while paused (draining the device at
-                    # the same cadence) rather than stopping the stream -- that
-                    # keeps the connection alive so resume is instant instead of
-                    # paying the ~1.5-2s reconnect latency measured earlier.
-                    # Paused audio is simply not kept.
-                    chunk = rec.record(numframes=CHUNK_FRAMES)
-                    if not self._paused_event.is_set():
-                        self._loopback_chunks.append(chunk)
+            while not self._stop_event.is_set():
+                if self._paused_event.is_set():
+                    # Consent, not just "don't save it": a pause that keeps
+                    # calling record() and merely discards the result still
+                    # physically samples the mic/speaker the whole time the UI
+                    # says "Paused" -- the same category of problem as an
+                    # earlier bug in this codebase (recording before explicit
+                    # Yes-consent). Actually close the stream instead. Costs
+                    # the ~1.5-2s reconnect latency on resume (documented
+                    # elsewhere in this file) -- worth it for a real pause.
+                    time.sleep(0.1)
+                    continue
+                with loopback_mic.recorder(samplerate=CAPTURE_RATE, channels=1) as rec:
+                    while not self._stop_event.is_set() and not self._paused_event.is_set():
+                        self._loopback_chunks.append(rec.record(numframes=CHUNK_FRAMES))
         except Exception as e:
             # Loopback is mandatory per spec (mic-only misses everyone else on the
             # call) -- record why it failed instead of silently degrading, so the
@@ -101,11 +107,13 @@ class Recorder:
     def _record_mic(self):
         try:
             mic = sc.default_microphone()
-            with mic.recorder(samplerate=CAPTURE_RATE, channels=1) as rec:
-                while not self._stop_event.is_set():
-                    chunk = rec.record(numframes=CHUNK_FRAMES)
-                    if not self._paused_event.is_set():
-                        self._mic_chunks.append(chunk)
+            while not self._stop_event.is_set():
+                if self._paused_event.is_set():
+                    time.sleep(0.1)
+                    continue
+                with mic.recorder(samplerate=CAPTURE_RATE, channels=1) as rec:
+                    while not self._stop_event.is_set() and not self._paused_event.is_set():
+                        self._mic_chunks.append(rec.record(numframes=CHUNK_FRAMES))
         except Exception:
             pass  # no mic available -> loopback-only recording
 
