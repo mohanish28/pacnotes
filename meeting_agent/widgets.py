@@ -1008,11 +1008,15 @@ class WallpaperPickerModal(QWidget):
         self.close()
 
     def _browse_custom_image(self):
+        # DontUseNativeDialog: the native Win32 file dialog crashes when its
+        # COM/shell integration is invoked from a PyInstaller --onefile
+        # bootloader on Windows; Qt's own dialog sidesteps it.
         path, _ = QFileDialog.getOpenFileName(
             self,
             "Select Wallpaper Image",
             "",
             "Images (*.png *.jpg *.jpeg *.webp *.bmp)",
+            options=QFileDialog.Option.DontUseNativeDialog,
         )
         if path:
             theme().custom_wallpaper_path = path

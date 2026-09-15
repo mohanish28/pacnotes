@@ -7,6 +7,8 @@ with just the owner as a test user means these scopes never trigger Google's
 sensitive-scope verification review -- that review is for apps other people
 install, not a personal tool.
 """
+import json
+import shutil
 from pathlib import Path
 
 from google.auth.transport.requests import Request
@@ -32,6 +34,34 @@ def _token_path() -> Path:
 
 def is_connected() -> bool:
     return _token_path().exists()
+
+
+def has_client_secret() -> bool:
+    return _client_secret_path().exists()
+
+
+def install_client_secret(src_path: Path) -> None:
+    """Copy a downloaded OAuth client JSON into place, after a basic shape check.
+
+    Raises ValueError if the file doesn't look like a Google "Desktop app"
+    client secret, so a wrong file picked in the setup dialog fails with a
+    clear message instead of a cryptic error during the browser flow later.
+    """
+    try:
+        data = json.loads(Path(src_path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as e:
+        raise ValueError(f"Couldn't read that file as JSON: {e}") from e
+
+    if "installed" not in data and "web" not in data:
+        raise ValueError(
+            "That doesn't look like a Google OAuth client file. In Google Cloud "
+            "Console, create an OAuth client of type \"Desktop app\" and download "
+            "its JSON."
+        )
+
+    dest = _client_secret_path()
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(src_path, dest)
 
 
 def get_credentials() -> Credentials:

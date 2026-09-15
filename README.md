@@ -35,10 +35,11 @@ Drive, only sends and creates the files it uploads itself.
    sensitive-scope verification review — that's only for apps other people install.
 4. **Credentials** (sidebar) → Create Credentials → OAuth client ID → Application
    type **Desktop app** → Create → **Download JSON**.
-5. Save that downloaded file as `google_credentials.json` in the same folder as
-   `config.json` (see below for the path; on Linux that's `~/.meeting_agent/`).
-6. In the app's Settings dialog, click **Connect Google Account** — opens a browser
-   for the one-time consent, then stores a refreshable token next to the config.
+5. In the app's Settings dialog, click **Connect Account**. The first time, a setup
+   dialog walks you through the steps above with a link to Cloud Console and a
+   **Choose credentials.json...** file picker — pick the file you just downloaded
+   and the app copies it into place itself. It then opens a browser for the
+   one-time consent and stores a refreshable token next to the config.
 
 ### 3. Storage: Cloudflare R2 or Google Drive
 Pick one in Settings (`storage_backend`). Google Drive needs nothing beyond the

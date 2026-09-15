@@ -2,7 +2,7 @@
 wallpaper selector, password visibility toggles, folder browsing, and fluid animations.
 """
 from pathlib import Path
-from PySide6.QtCore import QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QRectF, QSize, Qt, QUrl, Signal
 from PySide6.QtGui import QColor, QDesktopServices, QFont, QIcon, QPainter, QPen
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QDialog, QFileDialog, QFrame, QGraphicsDropShadowEffect,
@@ -26,6 +26,74 @@ from .widgets import (
 )
 
 SECRET_FIELDS = {"gemini_api_key", "r2_secret_access_key"}
+
+GOOGLE_CLOUD_CREDENTIALS_URL = "https://console.cloud.google.com/apis/credentials"
+
+
+class GoogleSetupDialog(QDialog):
+    """One-time guide for pointing the app at a user's own Google OAuth client.
+
+    Shown the first time "Connect Account" is clicked and no client secret is
+    on disk yet, instead of a bare FileNotFoundError -- walks the user to
+    Cloud Console and lets them pick the downloaded JSON with a file dialog.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Connect Google Account")
+        self.setFixedWidth(460)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(14)
+
+        title = QLabel("Connect your own Google account")
+        title.setStyleSheet("font-size: 13pt; font-weight: 700;")
+        layout.addWidget(title)
+
+        body = QLabel(
+            "This app uses your own Google OAuth client, so your Gmail/Drive/"
+            "Calendar access is never shared with anyone else. One-time setup:\n\n"
+            "1. Open Google Cloud Console and create (or reuse) an OAuth client "
+            "of type \"Desktop app\".\n"
+            "2. Download its JSON file.\n"
+            "3. Choose that file below."
+        )
+        body.setWordWrap(True)
+        body.setStyleSheet(f"font-size: 9.5pt; color: {theme().token('text_secondary')};")
+        layout.addWidget(body)
+
+        open_console_btn = AnimatedButton("Open Google Cloud Console", variant="secondary")
+        open_console_btn.clicked.connect(
+            lambda: QDesktopServices.openUrl(QUrl(GOOGLE_CLOUD_CREDENTIALS_URL))
+        )
+        layout.addWidget(open_console_btn)
+
+        choose_btn = AnimatedButton("Choose credentials.json...", variant="primary")
+        choose_btn.clicked.connect(self._choose_file)
+        layout.addWidget(choose_btn)
+
+        self.status_lbl = QLabel("")
+        self.status_lbl.setWordWrap(True)
+        self.status_lbl.setStyleSheet("color: #EF4444; font-size: 9pt;")
+        layout.addWidget(self.status_lbl)
+
+    def _choose_file(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select your Google OAuth client JSON",
+            "",
+            "JSON files (*.json)",
+            options=QFileDialog.Option.DontUseNativeDialog,
+        )
+        if not path:
+            return
+        try:
+            google_auth.install_client_secret(Path(path))
+        except ValueError as e:
+            self.status_lbl.setText(str(e))
+            return
+        self.accept()
 
 
 class PasswordLineEdit(QWidget):
@@ -384,7 +452,12 @@ class SettingsDialog(QDialog):
             self.drive_info_widget.show()
 
     def _browse_output_dir(self):
-        dir_path = QFileDialog.getExistingDirectory(self, "Select Output Directory", self.output_dir_edit.text())
+        # DontUseNativeDialog: native Win32 dialogs crash under a PyInstaller
+        # --onefile bootloader on Windows; see _browse_custom_wallpaper below.
+        dir_path = QFileDialog.getExistingDirectory(
+            self, "Select Output Directory", self.output_dir_edit.text(),
+            options=QFileDialog.Option.ShowDirsOnly | QFileDialog.Option.DontUseNativeDialog,
+        )
         if dir_path:
             self.output_dir_edit.setText(dir_path)
 
@@ -500,6 +573,10 @@ class SettingsDialog(QDialog):
         self.connect_google_btn.update()
 
     def _connect_google(self):
+        if not google_auth.has_client_secret():
+            if GoogleSetupDialog(self).exec() != QDialog.Accepted:
+                return  # user closed the setup dialog without choosing a file
+
         try:
             google_auth.get_credentials()
             self._refresh_google_status()
@@ -585,11 +662,15 @@ class SettingsDialog(QDialog):
         self.cfg["wallpaper"] = pid
 
     def _browse_custom_wallpaper(self):
+        # DontUseNativeDialog: the native Win32 file dialog's COM/shell
+        # integration crashes when invoked from a PyInstaller --onefile
+        # bootloader on Windows; Qt's own dialog sidesteps it.
         path, _ = QFileDialog.getOpenFileName(
             self,
             "Choose Wallpaper Image",
             "",
             "Images (*.png *.jpg *.jpeg *.webp *.bmp)",
+            options=QFileDialog.Option.DontUseNativeDialog,
         )
         if path:
             theme().custom_wallpaper_path = path
