@@ -33,6 +33,7 @@ jobs:
         shell: bash
         run: |
           pyinstaller --noconfirm --onefile --noconsole --name MeetingAgent \
+            --icon "meeting_agent/assets/icon.ico" \
             --add-data "meeting-notes-prompt.md;." \
             --add-data "svg;svg" \
             --collect-all faster_whisper \
