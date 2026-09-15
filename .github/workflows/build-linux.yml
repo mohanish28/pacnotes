@@ -48,6 +48,7 @@ jobs:
             --collect-all google_auth_oauthlib \
             --collect-all reportlab \
             --collect-all xhtml2pdf \
+            --collect-all soundcard \
             run_meeting_agent.py
 
       - uses: actions/upload-artifact@v4
