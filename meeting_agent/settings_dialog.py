@@ -2,7 +2,7 @@
 wallpaper selector, password visibility toggles, folder browsing, and fluid animations.
 """
 from pathlib import Path
-from PySide6.QtCore import QRectF, QSize, Qt, QUrl, Signal
+from PySide6.QtCore import QRectF, QSize, Qt, QThread, QUrl, Signal
 from PySide6.QtGui import QColor, QDesktopServices, QFont, QIcon, QPainter, QPen
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QDialog, QFileDialog, QFrame, QGraphicsDropShadowEffect,
@@ -28,6 +28,27 @@ from .widgets import (
 SECRET_FIELDS = {"gemini_api_key", "r2_secret_access_key"}
 
 GOOGLE_CLOUD_CREDENTIALS_URL = "https://console.cloud.google.com/apis/credentials"
+
+
+class GoogleConnectWorker(QThread):
+    """Runs the blocking OAuth browser flow off the GUI thread.
+
+    get_credentials() opens a browser and blocks on a local HTTP server
+    until the consent redirect lands -- that can take a while (or hang, if
+    the browser fails to launch), and running it on the main thread freezes
+    the whole app ("Not Responding") for the entire wait. Reproduced live.
+    """
+
+    succeeded = Signal()
+    failed = Signal(str)
+
+    def run(self):
+        try:
+            google_auth.get_credentials()
+        except Exception as e:
+            self.failed.emit(str(e))
+        else:
+            self.succeeded.emit()
 
 
 class GoogleSetupDialog(QDialog):
@@ -577,12 +598,24 @@ class SettingsDialog(QDialog):
             if GoogleSetupDialog(self).exec() != QDialog.Accepted:
                 return  # user closed the setup dialog without choosing a file
 
-        try:
-            google_auth.get_credentials()
-            self._refresh_google_status()
-            QMessageBox.information(self, "Success", "Google account connected successfully!")
-        except Exception as e:
-            QMessageBox.warning(self, "Google connection failed", str(e))
+        self.connect_google_btn.setEnabled(False)
+        self.connect_google_btn.setText("Waiting for browser...")
+        self.connect_google_btn.update()
+
+        self._google_worker = GoogleConnectWorker(self)
+        self._google_worker.succeeded.connect(self._on_google_connect_succeeded)
+        self._google_worker.failed.connect(self._on_google_connect_failed)
+        self._google_worker.start()
+
+    def _on_google_connect_succeeded(self):
+        self.connect_google_btn.setEnabled(True)
+        self._refresh_google_status()
+        QMessageBox.information(self, "Success", "Google account connected successfully!")
+
+    def _on_google_connect_failed(self, message: str):
+        self.connect_google_btn.setEnabled(True)
+        self._refresh_google_status()
+        QMessageBox.warning(self, "Google connection failed", message)
 
     # --------------------------------------------------------------------------
     # Tab 4: Appearance & Wallpaper

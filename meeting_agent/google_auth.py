@@ -7,8 +7,11 @@ with just the owner as a test user means these scopes never trigger Google's
 sensitive-scope verification review -- that review is for apps other people
 install, not a personal tool.
 """
+import contextlib
 import json
+import os
 import shutil
+import sys
 from pathlib import Path
 
 from google.auth.transport.requests import Request
@@ -64,6 +67,36 @@ def install_client_secret(src_path: Path) -> None:
     shutil.copyfile(src_path, dest)
 
 
+@contextlib.contextmanager
+def _real_ld_library_path():
+    """Undo the PyInstaller onefile bootloader's LD_LIBRARY_PATH override.
+
+    The bootloader points LD_LIBRARY_PATH at its own bundled libs so the
+    frozen app's imports resolve -- but a subprocess it spawns (here, the
+    browser that run_local_server() opens via webbrowser.open()) inherits
+    that same override and can fail to launch against incompatible bundled
+    libs. Reproduced live: Connect Account froze indefinitely on the
+    packaged Linux build with no browser ever opening. PyInstaller saves
+    the pre-override value in *_ORIG specifically for this case.
+    """
+    if not getattr(sys, "frozen", False):
+        yield
+        return
+    saved = os.environ.get("LD_LIBRARY_PATH")
+    orig = os.environ.get("LD_LIBRARY_PATH_ORIG")
+    if orig is not None:
+        os.environ["LD_LIBRARY_PATH"] = orig
+    else:
+        os.environ.pop("LD_LIBRARY_PATH", None)
+    try:
+        yield
+    finally:
+        if saved is not None:
+            os.environ["LD_LIBRARY_PATH"] = saved
+        else:
+            os.environ.pop("LD_LIBRARY_PATH", None)
+
+
 def get_credentials() -> Credentials:
     """Valid credentials for the shared scopes, refreshing or re-consenting as needed.
 
@@ -94,7 +127,8 @@ def get_credentials() -> Credentials:
         raise FileNotFoundError(msg)
 
     flow = InstalledAppFlow.from_client_secrets_file(str(client_secret), SCOPES)
-    creds = flow.run_local_server(port=0)
+    with _real_ld_library_path():
+        creds = flow.run_local_server(port=0)
     token_path.parent.mkdir(parents=True, exist_ok=True)
     token_path.write_text(creds.to_json(), encoding="utf-8")
     return creds
