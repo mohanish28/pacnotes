@@ -161,7 +161,7 @@ class SettingsDialog(QDialog):
 
     def __init__(self, cfg: dict, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Meeting Agent Settings")
+        self.setWindowTitle("PacNotes Settings")
         self.resize(840, 620)
         self.setMinimumSize(780, 560)
         self.cfg = dict(cfg)

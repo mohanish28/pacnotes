@@ -12,6 +12,11 @@ def main():
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     app.setWindowIcon(app_icon())
+    app.setApplicationName("PacNotes")
+    # Must match the installed .desktop file's id (pacnotes.desktop) so GNOME's
+    # dock/Alt-Tab show the real name+icon instead of falling back to the raw
+    # process name ("python3") when launched from a terminal, not the launcher.
+    app.setDesktopFileName("pacnotes")
 
     cfg = config_module.load_config()
     if not config_module.is_config_complete(cfg):

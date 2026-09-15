@@ -14,10 +14,13 @@ fi
 
 mkdir -p ~/.local/share/applications ~/.config/autostart
 
+# Filename (pacnotes.desktop) must match app.setDesktopFileName("pacnotes") in
+# main.py -- that's how GNOME's dock/Alt-Tab resolve the real Name/Icon below
+# instead of falling back to the raw process name when launched from a terminal.
 DESKTOP_ENTRY=$(cat << EOF
 [Desktop Entry]
 Type=Application
-Name=Meeting Agent
+Name=PacNotes
 Comment=Automatic meeting note-taker (Zoom/Meet/Teams -> transcript -> notes -> email)
 Exec="$VENV_PYTHON" -m meeting_agent
 Path=$PROJECT_DIR
@@ -29,10 +32,11 @@ X-GNOME-Autostart-enabled=true
 EOF
 )
 
-echo "$DESKTOP_ENTRY" > ~/.local/share/applications/meeting-agent.desktop
-echo "$DESKTOP_ENTRY" > ~/.config/autostart/meeting-agent.desktop
+echo "$DESKTOP_ENTRY" > ~/.local/share/applications/pacnotes.desktop
+echo "$DESKTOP_ENTRY" > ~/.config/autostart/pacnotes.desktop
+rm -f ~/.local/share/applications/meeting-agent.desktop ~/.config/autostart/meeting-agent.desktop
 update-desktop-database ~/.local/share/applications 2>/dev/null || true
 
 echo "Installed:"
-echo "  ~/.local/share/applications/meeting-agent.desktop (search/app grid launch)"
-echo "  ~/.config/autostart/meeting-agent.desktop (runs automatically on login)"
+echo "  ~/.local/share/applications/pacnotes.desktop (search/app grid launch)"
+echo "  ~/.config/autostart/pacnotes.desktop (runs automatically on login)"

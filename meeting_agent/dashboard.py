@@ -71,7 +71,7 @@ class DashboardWindow(QMainWindow):
     def __init__(self, controller):
         super().__init__()
         self.controller = controller
-        self.setWindowTitle("Meeting Agent Studio")
+        self.setWindowTitle("PacNotes Studio")
         self.setWindowIcon(app_icon())
         self.resize(960, 680)
         self.setMinimumSize(780, 520)
@@ -110,7 +110,7 @@ class DashboardWindow(QMainWindow):
 
         title_col = QVBoxLayout()
         title_col.setSpacing(1)
-        self.brand_title = QLabel("Meeting Agent")
+        self.brand_title = QLabel("PacNotes")
         self.brand_title.setStyleSheet("font-size: 13pt; font-weight: 800;")
         self.brand_subtitle = QLabel("🟢 Ready to Record")
         self.brand_subtitle.setStyleSheet(f"font-size: 8.5pt; color: #10B981; font-weight: 600;")

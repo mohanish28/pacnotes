@@ -481,7 +481,7 @@ class Controller:
         self.detector.meeting_ended.connect(self._on_meeting_ended)
 
         self.tray = QSystemTrayIcon(app_icon())
-        self.tray.setToolTip("Meeting Agent")
+        self.tray.setToolTip("PacNotes")
         menu = QMenu()
         menu.addAction("Dashboard", self._open_dashboard)
         menu.addAction("Take notes now", self._on_manual_trigger)
